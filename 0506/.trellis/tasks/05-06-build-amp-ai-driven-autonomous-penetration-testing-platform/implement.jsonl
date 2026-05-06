@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/shell-session-management.md", "reason": "Shell session management patterns for Linux/Windows targets"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/tunnel-management-patterns.md", "reason": "Tunnel management patterns from existing pentest tools"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/context-compression-strategies.md", "reason": "Context compression and token management for LLM agents"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/mcp-best-practices.md", "reason": "MCP protocol best practices and tool design guidelines"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/prd.md", "reason": "Product requirements and technical specifications"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer consistency patterns"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Code reuse and abstraction guidelines"}

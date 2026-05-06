@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/shell-session-management.md", "reason": "Verify shell session patterns are correctly implemented"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/tunnel-management-patterns.md", "reason": "Verify tunnel management follows best practices"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/context-compression-strategies.md", "reason": "Verify context engine implements compression correctly"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/research/mcp-best-practices.md", "reason": "Verify MCP server follows protocol guidelines"}
+{"file": ".trellis/tasks/05-06-build-amp-ai-driven-autonomous-penetration-testing-platform/prd.md", "reason": "Verify implementation matches requirements"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check cross-layer consistency"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check for code reuse opportunities"}
