@@ -82,8 +82,13 @@ class TunnelEdge:
 class NetworkGraph:
     """In-memory graph structure for network topology."""
 
-    def __init__(self) -> None:
-        """Initialize empty network graph."""
+    def __init__(self, database=None) -> None:
+        """Initialize empty network graph.
+
+        Args:
+            database: Optional database instance for syncing
+        """
+        self.database = database
         self.segments: dict[str, NetworkSegment] = {}
         self.tunnels: dict[str, TunnelEdge] = {}
         # Adjacency list: segment_id -> list of (neighbor_id, tunnel_id)
@@ -311,3 +316,100 @@ class NetworkGraph:
         self.tunnels.clear()
         self.adjacency.clear()
         logger.debug("Cleared network graph")
+
+    def sync_from_database(self) -> None:
+        """Sync graph from database tunnels.
+
+        Rebuilds the graph structure from database state.
+        """
+        if not self.database:
+            logger.warning("Cannot sync: no database configured")
+            return
+
+        from amp.storage.schema import Tunnel
+
+        with self.database.session() as session:
+            tunnels = session.query(Tunnel).all()
+
+            # Clear existing
+            self.clear()
+
+            logger.info(f"Syncing {len(tunnels)} tunnels from database")
+
+            # Rebuild from database
+            for tunnel in tunnels:
+                try:
+                    # Convert to TunnelType and TunnelStatus enums
+                    tunnel_type = TunnelType(tunnel.tunnel_type)
+                    tunnel_status = TunnelStatus(tunnel.status)
+
+                    # Add segments if they don't exist
+                    if tunnel.local_host not in self.segments:
+                        self.add_segment(
+                            segment_id=tunnel.local_host,
+                            cidr=f"{tunnel.local_host}/32",
+                            segment_type=SegmentType.INTERNAL,
+                            name=f"Local-{tunnel.local_host}",
+                        )
+
+                    if tunnel.remote_host not in self.segments:
+                        self.add_segment(
+                            segment_id=tunnel.remote_host,
+                            cidr=f"{tunnel.remote_host}/32",
+                            segment_type=SegmentType.INTERNAL,
+                            name=f"Remote-{tunnel.remote_host}",
+                        )
+
+                    # Add tunnel edge
+                    self.add_tunnel(
+                        tunnel_id=tunnel.id,
+                        source_segment=tunnel.local_host,
+                        target_segment=tunnel.remote_host,
+                        tunnel_type=tunnel_type,
+                        status=tunnel_status,
+                        metadata={
+                            "name": tunnel.name,
+                            "local_port": tunnel.local_port,
+                            "remote_port": tunnel.remote_port,
+                            "process_pid": tunnel.process_pid,
+                        },
+                    )
+
+                except Exception as e:
+                    logger.error(f"Failed to sync tunnel {tunnel.id}: {e}")
+
+            logger.info(f"Synced graph: {len(self.segments)} segments, {len(self.tunnels)} tunnels")
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get network graph statistics.
+
+        If database is configured, syncs first and returns database stats.
+        Otherwise returns in-memory stats.
+
+        Returns:
+            Dictionary with graph statistics
+        """
+        if self.database:
+            # Sync from database first
+            self.sync_from_database()
+
+            from amp.storage.schema import Tunnel
+
+            with self.database.session() as session:
+                total = session.query(Tunnel).count()
+                active = session.query(Tunnel).filter(
+                    Tunnel.status == TunnelStatus.ACTIVE.value
+                ).count()
+
+                return {
+                    "total_segments": len(self.segments),
+                    "total_tunnels": total,
+                    "active_tunnels": active,
+                }
+        else:
+            # Use in-memory stats
+            return {
+                "total_segments": len(self.segments),
+                "total_tunnels": len(self.tunnels),
+                "active_tunnels": len(self.get_active_tunnels()),
+            }

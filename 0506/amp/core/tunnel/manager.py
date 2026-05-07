@@ -573,6 +573,7 @@ class TunnelManager:
         host: str = "0.0.0.0",
         auth: str | None = None,
         keepalive: int = 30,
+        binary_path: str | None = None,
     ) -> ChiselServer:
         """Start a Chisel server to manage client connections.
 
@@ -581,6 +582,7 @@ class TunnelManager:
             host: Host to bind to (default: 0.0.0.0)
             auth: Authentication string (user:pass)
             keepalive: Keepalive interval in seconds
+            binary_path: Path to chisel binary (optional, overrides config/env)
 
         Returns:
             ChiselServer instance
@@ -594,8 +596,20 @@ class TunnelManager:
             logger.warning(f"Chisel server already running on port {port}")
             return self._servers[server_key]
 
+        # Use provided binary_path or fall back to config
+        if binary_path:
+            chisel_bin = binary_path
+        else:
+            try:
+                chisel_bin = settings.tunnel.chisel_path
+            except FileNotFoundError as e:
+                raise TunnelCreationFailed(
+                    str(e),
+                    retry_possible=False,
+                ) from e
+
         server = ChiselServer(
-            chisel_binary=settings.tunnel.chisel_binary,
+            chisel_binary=chisel_bin,
             port=port,
             host=host,
             auth=auth,
@@ -613,6 +627,7 @@ class TunnelManager:
         port: int,
         host: str = "0.0.0.0",
         selfcert: bool = True,
+        binary_path: str | None = None,
     ) -> LigoloProxy:
         """Start a Ligolo-ng proxy to manage agent connections.
 
@@ -620,6 +635,7 @@ class TunnelManager:
             port: Port to listen on
             host: Host to bind to (default: 0.0.0.0)
             selfcert: Use self-signed certificate
+            binary_path: Path to ligolo-ng binary (optional, overrides config/env)
 
         Returns:
             LigoloProxy instance
@@ -633,8 +649,20 @@ class TunnelManager:
             logger.warning(f"Ligolo proxy already running on port {port}")
             return self._servers[server_key]
 
+        # Use provided binary_path or fall back to config
+        if binary_path:
+            ligolo_bin = binary_path
+        else:
+            try:
+                ligolo_bin = settings.tunnel.ligolo_path
+            except FileNotFoundError as e:
+                raise TunnelCreationFailed(
+                    str(e),
+                    retry_possible=False,
+                ) from e
+
         proxy = LigoloProxy(
-            ligolo_binary=settings.tunnel.ligolo_binary,
+            ligolo_binary=ligolo_bin,
             port=port,
             host=host,
             selfcert=selfcert,

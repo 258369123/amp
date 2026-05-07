@@ -408,17 +408,61 @@ async def start_tunnel_server(
     port: int,
     host: str = "0.0.0.0",
     auth: str | None = None,
+    binary_path: str | None = None,
 ) -> dict[str, Any]:
     """Start a tunnel server (Chisel or Ligolo-ng) to manage client/agent connections.
 
+    Binary Path Configuration (priority order):
+    1. binary_path parameter (highest priority)
+    2. CHISEL_PATH or LIGOLO_PATH environment variable
+    3. AMP_TUNNEL__CHISEL_BINARY or AMP_TUNNEL__LIGOLO_BINARY config
+    4. Search in system PATH
+    5. Error if not found
+
     Args:
-        tunnel_type: Server type (chisel, ligolo)
+        tunnel_type: Server type ('chisel' or 'ligolo')
         port: Port to listen on
-        host: Host to bind to (default: 0.0.0.0)
-        auth: Authentication string for Chisel (user:pass)
+        host: Host to bind to (default: 0.0.0.0 for all interfaces)
+        auth: Authentication string for Chisel (format: user:pass)
+        binary_path: Custom binary path (optional, highest priority)
 
     Returns:
-        Response dict with server info
+        Response dict with server info:
+        {
+            "success": bool,
+            "data": {
+                "server_type": str,
+                "host": str,
+                "port": int,
+                "pid": int,
+                "status": str,
+                "binary": str  # Actual path used
+            },
+            "error": str (if failed),
+            "hint": str (if binary not found)
+        }
+
+    Examples:
+        # Use default/env path
+        start_tunnel_server('chisel', 8080)
+
+        # With authentication
+        start_tunnel_server('chisel', 8080, auth='user:pass123')
+
+        # Specify custom path
+        start_tunnel_server(
+            'chisel',
+            8080,
+            binary_path='/home/kali/Desktop/Chisel/chisel'
+        )
+
+        # Ligolo-ng server
+        start_tunnel_server('ligolo', 11601)
+
+    Error Handling:
+        - Returns error_type='binary_not_found' if binary not accessible
+        - Returns hint with configuration instructions
+        - Returns error_type='creation_failed' if server fails to start
     """
     try:
         if not _tunnel_manager:
@@ -439,20 +483,26 @@ async def start_tunnel_server(
 
         # Start appropriate server
         if tunnel_type_lower == "chisel":
+            # Pass binary_path if provided, otherwise use config/env
             server = _tunnel_manager.start_chisel_server(
                 port=port,
                 host=host,
                 auth=auth,
+                binary_path=binary_path,
             )
             server_type = "chisel"
         else:  # ligolo
             server = _tunnel_manager.start_ligolo_proxy(
                 port=port,
                 host=host,
+                binary_path=binary_path,
             )
             server_type = "ligolo"
 
         logger.info(f"Started {server_type} server on {host}:{port}")
+
+        # Get the actual binary path used
+        binary_used = getattr(server, 'chisel_binary', None) or getattr(server, 'ligolo_binary', None)
 
         return {
             "success": True,
@@ -462,9 +512,18 @@ async def start_tunnel_server(
                 "port": port,
                 "pid": server.pid,
                 "status": "running" if server.is_alive() else "stopped",
+                "binary": binary_used,  # Actual path used
             },
         }
 
+    except FileNotFoundError as e:
+        logger.error(f"Binary not found: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "binary_not_found",
+            "hint": "Set binary_path parameter or CHISEL_PATH/LIGOLO_PATH env var",
+        }
     except TunnelCreationFailed as e:
         logger.error(f"Failed to start tunnel server: {e}")
         return {

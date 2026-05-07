@@ -60,6 +60,93 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
+## Configuration
+
+### Binary Paths
+
+AMP requires external binaries for tunnel management. Configure paths using one of these methods:
+
+**Method 1: Environment Variables (Recommended)**
+```bash
+export CHISEL_PATH=/path/to/chisel
+export LIGOLO_PATH=/path/to/ligolo-ng
+```
+
+**Method 2: .env File**
+```bash
+# Create .env in project root (copy from .env.example)
+cp .env.example .env
+
+# Edit .env
+CHISEL_PATH=/path/to/chisel
+LIGOLO_PATH=/path/to/ligolo-ng
+```
+
+**Method 3: System PATH**
+```bash
+# Install binaries in system PATH
+sudo cp chisel /usr/local/bin/
+sudo cp ligolo-ng /usr/local/bin/
+sudo chmod +x /usr/local/bin/chisel
+sudo chmod +x /usr/local/bin/ligolo-ng
+```
+
+**Method 4: MCP Tool Parameter**
+```python
+# AI can specify dynamically in tool calls
+start_tunnel_server(
+    'chisel',
+    8080,
+    binary_path='/custom/path/chisel'
+)
+```
+
+**Priority Order**: binary_path parameter > Environment variable > System PATH
+
+### Shell Management
+
+AMP uses tmux for reliable shell management:
+
+```bash
+# Install tmux (required)
+sudo apt install tmux  # Ubuntu/Debian
+sudo yum install tmux  # CentOS/RHEL
+
+# Verify installation
+tmux -V
+```
+
+**Benefits of tmux-based shells**:
+- No prompt detection needed
+- Complete output capture
+- Natural persistence across sessions
+- Verified command execution
+
+### Configuration File
+
+All settings can be configured via `.env` file or environment variables with `AMP_` prefix:
+
+```bash
+# General
+AMP_DEBUG=false
+AMP_LOG_LEVEL=INFO
+
+# Tunnels
+AMP_TUNNEL__MAX_TUNNELS=20
+AMP_TUNNEL__HEARTBEAT_INTERVAL=30
+
+# Shells
+AMP_SHELL__MAX_SHELLS=50
+AMP_SHELL__DEFAULT_TIMEOUT=30
+
+# MCP Server
+AMP_MCP__HOST=127.0.0.1
+AMP_MCP__PORT=8899
+AMP_MCP__AUTH_TOKEN=your-secret-token
+```
+
+See `.env.example` for all available options.
+
 ### Usage
 
 #### Option 1: MCP Server (Recommended for Claude Code)
@@ -164,6 +251,26 @@ docker-compose up -d
 - Audit logs are written to SQLite (immutable)
 - Token-based authentication for MCP server
 - Resource limits prevent DoS (max 20 tunnels, 50 shells)
+
+## Troubleshooting
+
+For common issues and solutions, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+Common issues:
+- **Tunnel binary not found**: Configure `CHISEL_PATH` or `LIGOLO_PATH` environment variables
+- **Shell command returns empty output**: Verify tmux is installed (`tmux -V`)
+- **Reverse shell payload has 0.0.0.0**: Specify `local_ip` parameter manually
+- **SSH connection failed**: Check credentials and network connectivity
+
+Enable debug logging for detailed diagnostics:
+```bash
+# In .env
+AMP_DEBUG=true
+AMP_LOG_LEVEL=DEBUG
+
+# Check logs
+tail -f amp.log
+```
 
 ## License
 

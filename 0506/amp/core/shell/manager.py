@@ -28,6 +28,7 @@ from .executor import CommandExecutor
 from .payloads import ShellPayloads
 from .state import ShellState
 from .tmux_backend import TmuxBackend
+from .tmux_shell_manager import TmuxShellManager
 from .windows_executor import WindowsExecutor
 from .windows_payloads import WindowsPayloads
 
@@ -37,19 +38,33 @@ logger = logging.getLogger(__name__)
 class ShellManager:
     """Manager for shell session lifecycle and command execution."""
 
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, use_tmux: bool = True):
         """Initialize shell manager.
 
         Args:
             database: Database instance for persistence
+            use_tmux: Whether to use tmux-based shell management (default: True)
         """
         self.database = database
+        self.use_tmux = use_tmux
         self.tmux = TmuxBackend()
         self.executor = CommandExecutor()
         self.windows_executor = WindowsExecutor()
         self.state = ShellState()
         self._listeners: dict[str, socket.socket] = {}
         self._listener_threads: dict[str, threading.Thread] = {}
+
+        # Initialize tmux shell manager if enabled
+        if use_tmux:
+            try:
+                self.tmux_manager = TmuxShellManager()
+                logger.info("Tmux shell manager initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tmux manager: {e}, falling back to pexpect")
+                self.use_tmux = False
+                self.tmux_manager = None
+        else:
+            self.tmux_manager = None
 
     def create_reverse_shell(
         self,
@@ -98,7 +113,22 @@ class ShellManager:
             else:
                 logger.info(f"Using user-specified local IP for reverse shell: {local_ip}")
 
+            # Validate IP is not 0.0.0.0
+            if local_ip == "0.0.0.0":
+                raise ValueError(
+                    "Cannot use 0.0.0.0 for reverse shell payload. "
+                    "Specify local_ip parameter or check network configuration."
+                )
+
+            # Validate IP format
+            import ipaddress
+            try:
+                ipaddress.ip_address(local_ip)
+            except ValueError as e:
+                raise ValueError(f"Invalid IP address: {local_ip}") from e
+
             payload = ShellPayloads.get_payload(payload_type, local_ip, local_port)
+            logger.info(f"Generated reverse shell payload with IP {local_ip}:{local_port}")
 
             # Create shell record
             shell_data = {
@@ -296,13 +326,27 @@ class ShellManager:
 
             # Connect to bind shell
             try:
-                # Create tmux session if needed
-                if use_tmux and shell_model.tmux_session:
-                    self.tmux.create_session(shell_model.tmux_session, "bash")
+                if self.use_tmux and use_tmux and self.tmux_manager:
+                    # Use tmux manager
+                    result = self.tmux_manager.create_shell(
+                        shell_id=shell_model.id,
+                        shell_type="bind",
+                        target_host=target_host,
+                        target_port=target_port,
+                    )
+                    if not result.get("success"):
+                        raise ShellCreationFailed(
+                            reason=f"Tmux shell creation failed: {result.get('error')}",
+                            target=f"{target_host}:{target_port}",
+                        )
+                else:
+                    # Old pexpect way
+                    if use_tmux and shell_model.tmux_session:
+                        self.tmux.create_session(shell_model.tmux_session, "bash")
 
-                # Connect using netcat or similar
-                connect_cmd = f"nc {target_host} {target_port}"
-                self.executor.spawn_shell(shell_model.id, connect_cmd)
+                    # Connect using netcat or similar
+                    connect_cmd = f"nc {target_host} {target_port}"
+                    self.executor.spawn_shell(shell_model.id, connect_cmd)
 
                 # Update shell state
                 self._update_shell_state_internal(shell_model.id)
@@ -383,21 +427,38 @@ class ShellManager:
 
             # Connect via SSH
             try:
-                # Create tmux session if needed
-                if use_tmux and shell_model.tmux_session:
-                    self.tmux.create_session(shell_model.tmux_session, "bash")
+                if self.use_tmux and use_tmux and self.tmux_manager:
+                    # Use tmux manager
+                    result = self.tmux_manager.create_shell(
+                        shell_id=shell_model.id,
+                        shell_type="ssh",
+                        target_host=target_host,
+                        username=username,
+                        password=password,
+                        key_path=key_path,
+                        port=port,
+                    )
+                    if not result.get("success"):
+                        raise ShellCreationFailed(
+                            reason=f"Tmux shell creation failed: {result.get('error')}",
+                            target=f"{username}@{target_host}:{port}",
+                        )
+                else:
+                    # Old pexpect way
+                    if use_tmux and shell_model.tmux_session:
+                        self.tmux.create_session(shell_model.tmux_session, "bash")
 
-                # Build SSH command
-                ssh_cmd = f"ssh {username}@{target_host} -p {port}"
-                if key_path:
-                    ssh_cmd += f" -i {key_path}"
+                    # Build SSH command
+                    ssh_cmd = f"ssh {username}@{target_host} -p {port}"
+                    if key_path:
+                        ssh_cmd += f" -i {key_path}"
 
-                self.executor.spawn_shell(shell_model.id, ssh_cmd)
+                    self.executor.spawn_shell(shell_model.id, ssh_cmd)
 
-                # If password provided, send it
-                if password:
-                    time.sleep(1)  # Wait for password prompt
-                    self.executor.execute(shell_model.id, password, timeout=10)
+                    # If password provided, send it
+                    if password:
+                        time.sleep(1)  # Wait for password prompt
+                        self.executor.execute(shell_model.id, password, timeout=10)
 
                 # Update shell state
                 self._update_shell_state_internal(shell_model.id)
@@ -442,10 +503,15 @@ class ShellManager:
             op_repo = OperationRepository(session)
 
             # Verify shell exists
-            shell_repo.get_or_raise(shell_id)
+            shell = shell_repo.get_or_raise(shell_id)
 
             # Check if shell is alive
-            if not self.executor.is_alive(shell_id):
+            if self.use_tmux and self.tmux_manager:
+                is_alive = self.tmux_manager.is_alive(shell_id)
+            else:
+                is_alive = self.executor.is_alive(shell_id)
+
+            if not is_alive:
                 shell_repo.update_status(shell_id, ShellStatus.DEAD)
                 session.commit()
                 raise ShellDied(shell_id, "Shell process is not alive")
@@ -453,7 +519,24 @@ class ShellManager:
             # Execute command
             start_time = time.time()
             try:
-                result = self.executor.execute(shell_id, command, timeout)
+                if self.use_tmux and self.tmux_manager:
+                    # Use tmux manager
+                    result_dict = self.tmux_manager.execute_command(shell_id, command, timeout)
+
+                    # Convert dict to CommandResult
+                    from .executor import CommandResult
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    result = CommandResult(
+                        stdout=result_dict.get("stdout", ""),
+                        stderr=result_dict.get("stderr", ""),
+                        exit_code=result_dict.get("exit_code", 0),
+                        duration_ms=duration_ms,
+                        success=result_dict.get("success", False),
+                    )
+                else:
+                    # Use pexpect executor
+                    result = self.executor.execute(shell_id, command, timeout)
+
             except Exception as e:
                 # Record failed operation
                 duration_ms = int((time.time() - start_time) * 1000)
@@ -574,15 +657,20 @@ class ShellManager:
             repo = ShellRepository(session)
             shell = repo.get_or_raise(shell_id)
 
-            # Close executor session based on OS type
-            if shell.os_type == OSType.WINDOWS:
-                self.windows_executor.close_shell(shell_id)
+            # Close shell based on backend
+            if self.use_tmux and self.tmux_manager:
+                # Close tmux-managed shell
+                self.tmux_manager.close_shell(shell_id)
             else:
-                self.executor.close_shell(shell_id)
+                # Close executor session based on OS type
+                if shell.os_type == OSType.WINDOWS:
+                    self.windows_executor.close_shell(shell_id)
+                else:
+                    self.executor.close_shell(shell_id)
 
-            # Kill tmux session if exists
-            if shell.tmux_session:
-                self.tmux.kill_session(shell.tmux_session)
+                # Kill tmux session if exists
+                if shell.tmux_session:
+                    self.tmux.kill_session(shell.tmux_session)
 
             # Close listener if exists
             if shell_id in self._listeners:
@@ -616,35 +704,57 @@ class ShellManager:
             shell_id: Shell ID
         """
         try:
-            # Detect working directory
-            result = self.executor.execute(shell_id, "pwd", timeout=5)
-            if result.success:
-                cwd = result.stdout.strip()
-                self.state.update_cwd(shell_id, cwd)
+            # Execute commands based on backend
+            if self.use_tmux and self.tmux_manager:
+                # Use tmux manager for command execution
+                # Detect working directory
+                result_dict = self.tmux_manager.execute_command(shell_id, "pwd", timeout=5)
+                if result_dict.get("success"):
+                    cwd = result_dict.get("stdout", "").strip()
+                    self.state.update_cwd(shell_id, cwd)
 
-                # Update in database
-                with self.database.session() as session:
-                    repo = ShellRepository(session)
-                    repo.update_working_directory(shell_id, cwd)
-                    session.commit()
+                    # Update in database
+                    with self.database.session() as session:
+                        repo = ShellRepository(session)
+                        repo.update_working_directory(shell_id, cwd)
+                        session.commit()
 
-            # Detect privilege level
-            result = self.executor.execute(shell_id, "id -u", timeout=5)
-            if result.success:
-                privilege = self.state.detect_privilege(result.stdout)
-                self.state.update_privilege(shell_id, privilege)
+                # Detect privilege level
+                result_dict = self.tmux_manager.execute_command(shell_id, "id -u", timeout=5)
+                if result_dict.get("success"):
+                    privilege = self.state.detect_privilege(result_dict.get("stdout", ""))
+                    self.state.update_privilege(shell_id, privilege)
 
-            # Detect shell type
-            result = self.executor.execute(shell_id, "echo $SHELL", timeout=5)
-            if result.success:
-                shell_type = self.state.detect_shell_type(result.stdout)
-                self.state.update_shell_type(shell_id, shell_type)
+                # Detect shell type
+                result_dict = self.tmux_manager.execute_command(shell_id, "echo $SHELL", timeout=5)
+                if result_dict.get("success"):
+                    shell_type = self.state.detect_shell_type(result_dict.get("stdout", ""))
+                    self.state.update_shell_type(shell_id, shell_type)
+            else:
+                # Use pexpect executor
+                # Detect working directory
+                result = self.executor.execute(shell_id, "pwd", timeout=5)
+                if result.success:
+                    cwd = result.stdout.strip()
+                    self.state.update_cwd(shell_id, cwd)
 
-            # Get environment variables (optional, can be slow)
-            # result = self.executor.execute(shell_id, "env", timeout=10)
-            # if result.success:
-            #     env = self.state.parse_env_output(result.stdout)
-            #     self.state.update_env(shell_id, env)
+                    # Update in database
+                    with self.database.session() as session:
+                        repo = ShellRepository(session)
+                        repo.update_working_directory(shell_id, cwd)
+                        session.commit()
+
+                # Detect privilege level
+                result = self.executor.execute(shell_id, "id -u", timeout=5)
+                if result.success:
+                    privilege = self.state.detect_privilege(result.stdout)
+                    self.state.update_privilege(shell_id, privilege)
+
+                # Detect shell type
+                result = self.executor.execute(shell_id, "echo $SHELL", timeout=5)
+                if result.success:
+                    shell_type = self.state.detect_shell_type(result.stdout)
+                    self.state.update_shell_type(shell_id, shell_type)
 
         except Exception as e:
             logger.debug(f"Failed to update shell state for {shell_id}: {e}")

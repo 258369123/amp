@@ -1,5 +1,7 @@
 """Configuration management for AMP."""
 
+import os
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -20,6 +22,68 @@ class TunnelConfig(BaseModel):
     reconnect_delay: int = Field(default=5, description="Delay between reconnection attempts")
     chisel_binary: str = Field(default="chisel", description="Path to chisel binary")
     ligolo_binary: str = Field(default="ligolo-ng", description="Path to ligolo-ng binary")
+
+    @property
+    def chisel_path(self) -> str:
+        """Get chisel path with priority:
+        1. CHISEL_PATH env var
+        2. chisel_binary config (if absolute path exists)
+        3. Search in PATH
+
+        Returns:
+            Path to chisel binary
+
+        Raises:
+            FileNotFoundError: If chisel not found
+        """
+        # 1. Check env var
+        env_path = os.getenv("CHISEL_PATH")
+        if env_path and Path(env_path).exists():
+            return env_path
+
+        # 2. Check if config is absolute path
+        if Path(self.chisel_binary).exists():
+            return self.chisel_binary
+
+        # 3. Search in PATH
+        path = shutil.which(self.chisel_binary)
+        if path:
+            return path
+
+        raise FileNotFoundError(
+            f"Chisel not found. Set CHISEL_PATH env var or install chisel in PATH"
+        )
+
+    @property
+    def ligolo_path(self) -> str:
+        """Get ligolo path with priority:
+        1. LIGOLO_PATH env var
+        2. ligolo_binary config (if absolute path exists)
+        3. Search in PATH
+
+        Returns:
+            Path to ligolo-ng binary
+
+        Raises:
+            FileNotFoundError: If ligolo-ng not found
+        """
+        # 1. Check env var
+        env_path = os.getenv("LIGOLO_PATH")
+        if env_path and Path(env_path).exists():
+            return env_path
+
+        # 2. Check if config is absolute path
+        if Path(self.ligolo_binary).exists():
+            return self.ligolo_binary
+
+        # 3. Search in PATH
+        path = shutil.which(self.ligolo_binary)
+        if path:
+            return path
+
+        raise FileNotFoundError(
+            f"Ligolo-ng not found. Set LIGOLO_PATH env var or install ligolo-ng in PATH"
+        )
 
 
 class ShellConfig(BaseModel):
