@@ -30,19 +30,25 @@ def initialize_managers(database: Database) -> dict[str, Any]:
     Returns:
         Dictionary of initialized managers
     """
+    from amp.config import settings
+
     # Initialize managers
     tunnel_manager = TunnelManager(database)
     shell_manager = ShellManager(database)
 
     # Initialize context components
-    vector_store = VectorStore()
+    vector_store = VectorStore(db_path=settings.context.vector_db_path)
     similarity_search = SimilaritySearch(vector_store)
     prompt_builder = PromptBuilder(
         vector_store=vector_store,
         tunnel_manager=tunnel_manager,
         shell_manager=shell_manager,
+        max_tokens=settings.context.max_tokens,
     )
-    context_compressor = ContextCompressor()
+    context_compressor = ContextCompressor(
+        max_tokens=settings.context.max_tokens,
+        threshold=settings.context.compression_threshold,
+    )
 
     # Initialize network components
     network_graph = NetworkGraph()
@@ -50,6 +56,7 @@ def initialize_managers(database: Database) -> dict[str, Any]:
     route_calculator = RouteCalculator(network_graph)
 
     return {
+        "database": database,
         "tunnel_manager": tunnel_manager,
         "shell_manager": shell_manager,
         "vector_store": vector_store,
@@ -84,7 +91,7 @@ def register_all_tools(managers: dict[str, Any]) -> None:
 
     # Set web components (for web UI API endpoints)
     set_web_components(
-        database,
+        managers["database"],
         managers["network_graph"],
         managers["topology_visualizer"],
         managers["route_calculator"],
