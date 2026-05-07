@@ -104,9 +104,31 @@ Phase 1 delivered:
 
 ## Phase 2: Execution Layer (Week 3-4)
 
-### PR4: Shell Manager - Linux (Next)
-- tmux backend implementation
-- Command execution with pexpect
-- Shell state tracking
-- Reverse/bind/SSH shell creation
-- Linux-specific tests
+### PR4: Shell Manager - Linux ✅ (Completed)
+**Commit**: e6a63e3
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ TmuxBackend for persistent shell sessions
+- ✅ CommandExecutor with pexpect
+- ✅ ShellState tracking (cwd, env, privilege, shell type)
+- ✅ ShellPayloads generation (bash, python, nc, perl, php, ruby, powershell)
+- ✅ ShellManager lifecycle management
+- ✅ Reverse/bind/SSH shell creation
+- ✅ Command execution with timeout
+- ✅ Integration with storage layer
+- ✅ Unit tests (34 tests, 100% pass rate)
+
+Files created:
+- amp/core/shell/tmux_backend.py (tmux session management)
+- amp/core/shell/executor.py (command execution)
+- amp/core/shell/state.py (state tracking)
+- amp/core/shell/payloads.py (payload generation)
+- amp/core/shell/manager.py (ShellManager)
+- amp/tests/unit/test_shell_manager.py (34 tests)
+
+### PR5: Shell Manager - Windows (Next)
+- PowerShell/CMD support
+- Windows-specific payload generation
+- UAC and privilege handling
+- Cross-platform integration tests
