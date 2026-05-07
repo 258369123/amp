@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "amp": {
+      "command": "python",
+      "args": ["-m", "amp.mcp.run_mcp_server"],
+      "cwd": "/path/to/amp",
+      "env": {
+        "PYTHONPATH": "/path/to/amp"
+      }
+    }
+  }
+}

@@ -42,38 +42,45 @@ AMP is an AI-driven platform that integrates Claude Code CLI with multi-layer ne
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Python 3.11+ (for development)
+- Python 3.11+
 - Claude Code CLI
+- Docker (optional, for test environment)
 
 ### Installation
 
 ```bash
-# Pull the Docker image
-docker pull amp-pentest:latest
-
-# Or build from source
+# Clone the repository
 git clone https://github.com/yourusername/amp-pentest.git
 cd amp-pentest
-docker-compose up -d
+
+# Install dependencies
+pip install -e .
+
+# Or with development dependencies
+pip install -e ".[dev]"
 ```
 
 ### Usage
 
+#### Option 1: MCP Server (Recommended for Claude Code)
+
 1. Start the AMP MCP server:
 ```bash
-docker run -d -p 8765:8765 amp-pentest:latest
+# Using the entry point
+amp-mcp
+
+# Or directly
+python -m amp.mcp.run_mcp_server
 ```
 
-2. Configure Claude Code to use AMP MCP server (add to `~/.claude/settings.json`):
+2. Configure Claude Code MCP settings:
 ```json
 {
-  "mcp": {
-    "servers": {
-      "amp": {
-        "url": "http://localhost:8765",
-        "auth_token": "your-token-here"
-      }
+  "mcpServers": {
+    "amp": {
+      "command": "python",
+      "args": ["-m", "amp.mcp.run_mcp_server"],
+      "cwd": "/path/to/amp"
     }
   }
 }
@@ -83,6 +90,20 @@ docker run -d -p 8765:8765 amp-pentest:latest
 ```
 > I need to test the security of 192.168.1.100 through a DMZ host at 10.0.0.5
 ```
+
+#### Option 2: REST API + Web UI
+
+1. Start the FastAPI server:
+```bash
+python amp/mcp/run_server.py
+
+# Or using uvicorn
+uvicorn amp.mcp.server:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+2. Access Web UI at: http://127.0.0.1:8000
+
+3. API documentation at: http://127.0.0.1:8000/docs
 
 ## Development
 
