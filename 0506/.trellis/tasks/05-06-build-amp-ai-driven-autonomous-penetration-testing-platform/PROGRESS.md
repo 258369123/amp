@@ -164,8 +164,30 @@ Phase 2 delivered:
 
 ## Phase 3: Intelligence Layer (Week 5-6)
 
-### PR6: Context Engine - Storage (Next)
-- ChromaDB integration
-- Vector embedding for operations
-- Similarity search implementation
-- Basic compression logic
+### PR6: Context Engine - Storage ✅ (Completed)
+**Commit**: 81233cc
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ VectorStore (ChromaDB integration)
+- ✅ EmbeddingGenerator (sentence-transformers)
+- ✅ SimilaritySearch (relevance-based search)
+- ✅ ContextCompressor (token-aware compression)
+- ✅ Cosine similarity search
+- ✅ Metadata filtering
+- ✅ Relevance scoring (similarity + recency)
+- ✅ Token budget management
+- ✅ Unit tests (27 tests, 100% pass rate)
+
+Files created:
+- amp/core/context/vector_store.py (ChromaDB wrapper)
+- amp/core/context/embeddings.py (embedding generation)
+- amp/core/context/search.py (similarity search)
+- amp/core/context/compression.py (context compression)
+- amp/tests/unit/test_context_storage.py (27 tests)
+
+### PR7: Context Engine - Prompt Builder (Next)
+- Dynamic prompt generation
+- Progressive disclosure logic
+- Token budget management
+- Relevance scoring algorithm
