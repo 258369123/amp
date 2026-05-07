@@ -1,70 +1,87 @@
-"""AMP configuration management."""
+"""Configuration management for AMP."""
 
 from pathlib import Path
-from typing import Optional
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 
-class AMPSettings(BaseSettings):
-    """AMP platform settings."""
+class DatabaseConfig(BaseModel):
+    """Database configuration."""
+    url: str = Field(default="sqlite:///amp.db", description="Database URL")
+    echo: bool = Field(default=False, description="Enable SQL logging")
 
-    model_config = SettingsConfigDict(
-        env_prefix="AMP_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
 
-    # Core settings
-    data_dir: Path = Field(default=Path.home() / ".amp" / "data")
-    log_level: str = Field(default="INFO")
-    max_concurrent_tunnels: int = Field(default=20)
-    max_concurrent_shells: int = Field(default=50)
+class TunnelConfig(BaseModel):
+    """Tunnel configuration."""
+    max_tunnels: int = Field(default=20, description="Maximum concurrent tunnels")
+    heartbeat_interval: int = Field(default=30, description="Heartbeat interval in seconds")
+    reconnect_attempts: int = Field(default=3, description="Reconnection attempts")
+    reconnect_delay: int = Field(default=5, description="Delay between reconnection attempts")
+    chisel_binary: str = Field(default="chisel", description="Path to chisel binary")
+    ligolo_binary: str = Field(default="ligolo-ng", description="Path to ligolo-ng binary")
 
-    # Tunnel settings
-    tunnel_default_method: str = Field(default="chisel")
-    tunnel_health_check_interval: int = Field(default=30)
-    tunnel_auto_recovery: bool = Field(default=True)
-    chisel_binary_path: Path = Field(default=Path("/usr/local/bin/chisel"))
-    chisel_port_range_start: int = Field(default=10000)
-    chisel_port_range_end: int = Field(default=20000)
-    ligolo_binary_path: Path = Field(default=Path("/usr/local/bin/ligolo-ng"))
-    ligolo_interface_name: str = Field(default="ligolo")
 
-    # Shell settings
-    tmux_socket_path: Path = Field(default=Path.home() / ".amp" / "tmux.sock")
-    tmux_default_shell: str = Field(default="/bin/bash")
-    shell_command_timeout: int = Field(default=30)
-    shell_output_buffer_size: int = Field(default=10000)
+class ShellConfig(BaseModel):
+    """Shell configuration."""
+    max_shells: int = Field(default=50, description="Maximum concurrent shells")
+    default_timeout: int = Field(default=30, description="Default command timeout in seconds")
+    tmux_socket: str | None = Field(default=None, description="Custom tmux socket path")
+    zombie_check_interval: int = Field(default=60, description="Zombie process check interval")
 
-    # Context engine settings
-    context_vector_db: str = Field(default="chromadb")
-    context_embedding_model: str = Field(default="text-embedding-3-small")
-    context_max_tokens: int = Field(default=8000)
-    context_compression_strategy: str = Field(default="dynamic")
 
-    # MCP server settings
-    mcp_host: str = Field(default="127.0.0.1")
-    mcp_port: int = Field(default=8765)
-    mcp_auth_token: Optional[str] = Field(default=None)
+class ContextConfig(BaseModel):
+    """Context engine configuration."""
+    max_tokens: int = Field(default=8000, description="Maximum context tokens")
+    compression_threshold: float = Field(default=0.7, description="Compression threshold (0-1)")
+    vector_db_path: str = Field(default="./chroma_db", description="ChromaDB path")
+    embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model")
 
-    # Security settings
-    security_isolation_mode: str = Field(default="docker")
-    security_audit_log: Path = Field(default=Path.home() / ".amp" / "audit.log")
-    security_safe_mode: bool = Field(default=False)
 
-    # Database settings
-    db_url: str = Field(default="sqlite:///{data_dir}/amp.db")
+class MCPConfig(BaseModel):
+    """MCP server configuration."""
+    host: str = Field(default="127.0.0.1", description="Server host")
+    port: int = Field(default=8000, description="Server port")
+    auth_token: str | None = Field(default=None, description="Authentication token")
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"], description="CORS origins")
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Ensure data directory exists
+
+class SecurityConfig(BaseModel):
+    """Security configuration."""
+    docker_isolation: bool = Field(default=True, description="Enable Docker isolation")
+    network_isolation: bool = Field(default=True, description="Enable network isolation")
+    log_commands: bool = Field(default=True, description="Log all commands")
+    log_output: bool = Field(default=False, description="Log command output (may contain sensitive data)")
+
+
+class Settings(BaseSettings):
+    """Application settings."""
+
+    # General
+    app_name: str = Field(default="AMP", description="Application name")
+    debug: bool = Field(default=False, description="Debug mode")
+    log_level: str = Field(default="INFO", description="Logging level")
+    data_dir: Path = Field(default=Path("./data"), description="Data directory")
+
+    # Module configs
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    tunnel: TunnelConfig = Field(default_factory=TunnelConfig)
+    shell: ShellConfig = Field(default_factory=ShellConfig)
+    context: ContextConfig = Field(default_factory=ContextConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        env_nested_delimiter = "__"
+        case_sensitive = False
+
+    def ensure_directories(self):
+        """Ensure required directories exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        # Expand db_url template
-        self.db_url = self.db_url.format(data_dir=self.data_dir)
+        Path(self.context.vector_db_path).mkdir(parents=True, exist_ok=True)
 
 
 # Global settings instance
-settings = AMPSettings()
+settings = Settings()

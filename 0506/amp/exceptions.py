@@ -1,13 +1,12 @@
 """AMP exception hierarchy."""
 
-from typing import Optional
 from datetime import datetime
 
 
 class AMPException(Exception):
     """Base exception for all AMP errors."""
 
-    def __init__(self, message: str, details: Optional[dict] = None):
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(message)
         self.message = message
         self.details = details or {}
@@ -83,7 +82,7 @@ class CommandExecutionFailed(ShellException):
 class ShellDied(ShellException):
     """Raised when shell session dies unexpectedly."""
 
-    def __init__(self, shell_id: str, reason: Optional[str] = None):
+    def __init__(self, shell_id: str, reason: str | None = None):
         msg = f"Shell {shell_id} died"
         if reason:
             msg += f": {reason}"
