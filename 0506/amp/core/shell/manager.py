@@ -60,6 +60,7 @@ class ShellManager:
         payload_type: str = "bash",
         use_tmux: bool = True,
         timeout: int = 30,
+        local_ip: str | None = None,
     ) -> tuple[ShellModel, str]:
         """Create a reverse shell (listener on attacker).
 
@@ -71,6 +72,7 @@ class ShellManager:
             payload_type: Payload type (bash, python, nc, etc.)
             use_tmux: Whether to use tmux for persistence
             timeout: Timeout in seconds to wait for connection
+            local_ip: Local IP for payload (auto-detected if None)
 
         Returns:
             Tuple of (shell model, payload command)
@@ -89,8 +91,12 @@ class ShellManager:
 
             # CRITICAL FIX: Get actual local IP instead of 0.0.0.0
             # 0.0.0.0 is invalid for target to connect back to
-            local_ip = self._get_local_ip()
-            logger.info(f"Using local IP for reverse shell: {local_ip}")
+            # Allow user/model to specify IP, or auto-detect
+            if local_ip is None:
+                local_ip = self._get_local_ip()
+                logger.info(f"Auto-detected local IP for reverse shell: {local_ip}")
+            else:
+                logger.info(f"Using user-specified local IP for reverse shell: {local_ip}")
 
             payload = ShellPayloads.get_payload(payload_type, local_ip, local_port)
 

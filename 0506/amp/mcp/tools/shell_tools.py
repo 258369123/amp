@@ -34,6 +34,7 @@ async def create_shell(
     os_type: str = "linux",
     tunnel_id: str | None = None,
     local_port: int | None = None,
+    local_ip: str | None = None,
     target_port: int | None = None,
     shell_program: str = "bash",
     username: str | None = None,
@@ -52,6 +53,7 @@ async def create_shell(
         os_type: Operating system type (linux, windows)
         tunnel_id: Tunnel ID if using tunnel
         local_port: Local port for reverse shells
+        local_ip: Local IP for reverse shell payload (auto-detected if None)
         target_port: Target port for bind/ssh shells
         shell_program: Shell program (bash, sh, powershell, cmd)
         username: Username for SSH shells
@@ -114,6 +116,7 @@ async def create_shell(
                     payload_type=payload_type or "bash",
                     use_tmux=use_tmux,
                     timeout=timeout,
+                    local_ip=local_ip,  # Pass through local_ip
                 )
 
             logger.info(f"Created reverse shell {shell.id} ({name})")
