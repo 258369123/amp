@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMP - Network Topology Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>AMP - Autonomous Penetration Testing Platform</h1>
+            <p class="subtitle">Network Topology Visualization</p>
+        </header>
+
+        <!-- Dashboard -->
+        <div class="dashboard">
+            <div class="stat-card">
+                <h3>Tunnels</h3>
+                <div class="stat-value" id="tunnels-total">-</div>
+                <div class="stat-label">
+                    <span class="active" id="tunnels-active">-</span> active
+                </div>
+            </div>
+            <div class="stat-card">
+                <h3>Shells</h3>
+                <div class="stat-value" id="shells-total">-</div>
+                <div class="stat-label">
+                    <span class="active" id="shells-active">-</span> active
+                </div>
+            </div>
+            <div class="stat-card">
+                <h3>Segments</h3>
+                <div class="stat-value" id="segments-total">-</div>
+                <div class="stat-label">Network segments</div>
+            </div>
+            <div class="stat-card">
+                <h3>Status</h3>
+                <div class="stat-value status-indicator" id="system-status">
+                    <span class="status-dot active"></span> Online
+                </div>
+                <div class="stat-label" id="last-update">-</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Topology Visualization -->
+            <div class="topology-panel">
+                <div class="panel-header">
+                    <h2>Network Topology</h2>
+                    <div class="controls">
+                        <button id="zoom-in" class="btn btn-sm">+</button>
+                        <button id="zoom-out" class="btn btn-sm">-</button>
+                        <button id="reset-view" class="btn btn-sm">Reset</button>
+                        <button id="refresh" class="btn btn-sm btn-primary">Refresh</button>
+                    </div>
+                </div>
+                <div id="topology" class="topology-container"></div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <span class="legend-node external"></span> External
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-node dmz"></span> DMZ
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-node internal"></span> Internal
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-node domain"></span> Domain
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-line active"></span> Active
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-line inactive"></span> Inactive
+                    </div>
+                </div>
+            </div>
+
+            <!-- Details Panel -->
+            <div class="details-panel">
+                <div class="panel-header">
+                    <h2>Details</h2>
+                </div>
+                <div id="details-content" class="details-content">
+                    <p class="placeholder">Click on a node or link to view details</p>
+                </div>
+
+                <!-- Recent Operations -->
+                <div class="operations-section">
+                    <h3>Recent Operations</h3>
+                    <div id="operations-list" class="operations-list">
+                        <p class="placeholder">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/topology.js"></script>
+</body>
+</html>

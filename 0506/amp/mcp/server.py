@@ -18,6 +18,7 @@ from amp.mcp.protocol import (
     ToolResponse,
 )
 from amp.mcp.tool_registry import tool_registry
+from amp.web import setup_web_routes
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ def create_app() -> FastAPI:
 
     # Setup routes
     setup_routes(app)
+
+    # Setup web UI routes
+    setup_web_routes(app)
 
     # Setup exception handlers
     setup_exception_handlers(app)
