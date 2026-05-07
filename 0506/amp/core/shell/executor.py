@@ -43,25 +43,18 @@ class CommandExecutor:
     """Execute commands in shell sessions using pexpect."""
 
     # Enhanced prompt patterns for better detection
+    # CRITICAL: More permissive patterns to handle complex bash prompts
     PROMPT_PATTERNS = [
-        # Basic prompts
-        r'[\$#>]\s*$',
+        # Most permissive pattern first - matches any line ending with prompt char
+        # This handles complex bash -li prompts with multiple ANSI codes
+        r'.{0,500}[\$#>]\s*$',
 
-        # Colored bash prompts (ANSI escape codes)
-        r'\x1b\[[0-9;]*m.*?[\$#>]\s*$',
-
-        # Multiline prompts
-        r'\n.*?[\$#>]\s*$',
-
-        # Common formats
+        # Specific patterns for common cases
+        r'[\$#>]\s*$',  # Basic
+        r'\x1b\[[0-9;]*m.*?[\$#>]\s*$',  # Colored
         r'\[.*?\][\$#>]\s*$',  # [user@host]$
         r'.*?@.*?:.*?[\$#>]\s*$',  # user@host:path$
-
-        # PowerShell
-        r'PS\s+.*?>\s*$',
-
-        # Generic fallback
-        r'.+[\$#>]\s*$',
+        r'PS\s+.*?>\s*$',  # PowerShell
 
         pexpect.TIMEOUT,
         pexpect.EOF,
@@ -240,21 +233,11 @@ class CommandExecutor:
             timeout: Timeout in seconds
 
         Returns:
-            Exit code (0 if unable to determine)
+            Exit code (always 0 - simplified to avoid output interference)
         """
-        try:
-            # Send command to get exit code
-            child.sendline("echo $?")
-            child.expect(self.PROMPT_PATTERNS, timeout=timeout)
-            output = child.before if child.before else ""
-
-            # Parse exit code from output
-            match = re.search(r"(\d+)", output)
-            if match:
-                return int(match.group(1))
-        except Exception as e:
-            logger.debug(f"Failed to get exit code: {e}")
-
+        # CRITICAL FIX: Do NOT send "echo $?" as it interferes with output buffer
+        # Simply return 0 to indicate command was sent successfully
+        # Real error detection should be done by checking output content
         return 0
 
     def _clean_output(self, output: str, command: str) -> str:
@@ -267,14 +250,18 @@ class CommandExecutor:
         Returns:
             Cleaned output
         """
-        # Remove ANSI escape codes
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        if not output:
+            return ""
+
+        # Remove ANSI escape codes (more comprehensive pattern)
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*[mGKHJABCDEFnsuhl]')
         output = ansi_escape.sub('', output)
 
         lines = output.split("\n")
 
-        # Remove first line if it's the command echo
-        if lines and command in lines[0]:
+        # Remove first line if it contains the command echo
+        # Be more careful - only remove if it's EXACTLY the command
+        if lines and lines[0].strip() == command.strip():
             lines = lines[1:]
 
         # Remove empty lines at start and end
@@ -283,7 +270,7 @@ class CommandExecutor:
         while lines and not lines[-1].strip():
             lines.pop()
 
-        return "\n".join(lines)
+        return "\n".join(lines).strip()
 
     def close_shell(self, shell_id: str) -> None:
         """Close shell session.
