@@ -16,6 +16,7 @@ from amp.mcp.protocol import ParameterType, ToolParameter
 from amp.mcp.tool_registry import tool_registry
 from amp.mcp.tools import context_tools, network_tools, shell_tools, tunnel_tools
 from amp.storage.database import Database
+from amp.web.api import set_web_components
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,14 @@ def register_all_tools(managers: dict[str, Any]) -> None:
         managers["context_compressor"],
     )
     network_tools.set_network_components(
+        managers["network_graph"],
+        managers["topology_visualizer"],
+        managers["route_calculator"],
+    )
+
+    # Set web components (for web UI API endpoints)
+    set_web_components(
+        database,
         managers["network_graph"],
         managers["topology_visualizer"],
         managers["route_calculator"],
