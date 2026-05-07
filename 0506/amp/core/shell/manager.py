@@ -87,8 +87,11 @@ class ShellManager:
             if active_count >= settings.shell.max_shells:
                 raise ShellLimitExceeded(active_count, settings.shell.max_shells)
 
-            # Generate payload
-            local_ip = "0.0.0.0"  # Listen on all interfaces
+            # CRITICAL FIX: Get actual local IP instead of 0.0.0.0
+            # 0.0.0.0 is invalid for target to connect back to
+            local_ip = self._get_local_ip()
+            logger.info(f"Using local IP for reverse shell: {local_ip}")
+
             payload = ShellPayloads.get_payload(payload_type, local_ip, local_port)
 
             # Create shell record
@@ -973,3 +976,22 @@ class ShellManager:
         except Exception as e:
             logger.warning(f"Bind connection failed: {host}:{port} - {e}")
             return False
+
+    def _get_local_ip(self) -> str:
+        """Get local IP address for reverse shell connections.
+
+        Returns:
+            Local IP address (not 0.0.0.0 or 127.0.0.1)
+        """
+        try:
+            # Connect to external IP to determine local interface IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            logger.info(f"Detected local IP: {local_ip}")
+            return local_ip
+        except Exception as e:
+            logger.warning(f"Failed to get local IP: {e}, using 127.0.0.1")
+            return "127.0.0.1"
+

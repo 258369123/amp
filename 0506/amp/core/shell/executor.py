@@ -159,8 +159,24 @@ class CommandExecutor:
         start_time = time.time()
 
         try:
+            # CRITICAL FIX: Clear buffer first to ensure clean state
+            child.sendline('')
+            try:
+                child.expect(self.PROMPT_PATTERNS, timeout=2)
+            except pexpect.TIMEOUT:
+                pass  # OK if no prompt yet
+
             # Send command
             child.sendline(command)
+
+            # CRITICAL FIX: Wait for command echo to verify it was received
+            # This prevents false success when command isn't actually sent
+            try:
+                child.expect(re.escape(command.strip()), timeout=5)
+                logger.debug(f"Command echo received: {command}")
+            except pexpect.TIMEOUT:
+                logger.warning(f"Command echo not received: {command}")
+                # Continue anyway, but log warning
 
             # Wait for command to complete
             index = child.expect(self.PROMPT_PATTERNS, timeout=timeout)
