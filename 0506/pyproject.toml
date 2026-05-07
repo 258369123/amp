@@ -54,7 +54,7 @@ dev = [
 
 [project.scripts]
 amp = "amp.cli.main:app"
-amp-mcp = "amp.mcp.run_mcp_server:main"
+amp-mcp = "amp.mcp.run_mcp_server:cli_main"
 
 [tool.setuptools.packages.find]
 where = ["."]

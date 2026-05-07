@@ -17,10 +17,9 @@ from amp.storage.database import Database
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, settings.log_level),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(settings.logging.log_file),
         logging.StreamHandler(sys.stderr),  # Log to stderr, not stdout (stdout is for MCP protocol)
     ]
 )
@@ -33,7 +32,6 @@ async def main() -> None:
     try:
         logger.info("Starting AMP MCP Server")
         logger.info(f"Database: {settings.database.url}")
-        logger.info(f"Log file: {settings.logging.log_file}")
 
         # Ensure data directory exists
         data_dir = Path(settings.database.url.replace("sqlite:///", "")).parent
@@ -64,4 +62,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    asyncio.run(main())
+
+
+def cli_main():
+    """Entry point for console script."""
     asyncio.run(main())
