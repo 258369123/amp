@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from amp.core.tunnel.chisel import ChiselProcess
+from amp.core.tunnel.ligolo import LigoloProcess
 from amp.core.tunnel.manager import TunnelManager
 from amp.exceptions import (
     TunnelCreationFailed,
@@ -526,6 +527,291 @@ class TestTunnelManager:
         tunnel2 = tunnel_manager.get_tunnel(tunnel2.id)
         assert tunnel1.status == TunnelStatus.STOPPED
         assert tunnel2.status == TunnelStatus.STOPPED
+
+
+class TestTunnelManagerAdvanced:
+    """Test advanced tunnel manager features."""
+
+    def test_enable_auto_recovery(self, tunnel_manager):
+        """Test enabling auto-recovery for a tunnel."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+
+        tunnel_manager.enable_auto_recovery(tunnel.id)
+        assert tunnel_manager.recovery.is_recovery_enabled(tunnel.id) is True
+
+    def test_enable_auto_recovery_nonexistent_tunnel(self, tunnel_manager):
+        """Test enabling auto-recovery for non-existent tunnel."""
+        with pytest.raises(TunnelNotFound):
+            tunnel_manager.enable_auto_recovery("nonexistent-id")
+
+    def test_disable_auto_recovery(self, tunnel_manager):
+        """Test disabling auto-recovery for a tunnel."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+
+        tunnel_manager.enable_auto_recovery(tunnel.id)
+        tunnel_manager.disable_auto_recovery(tunnel.id)
+        assert tunnel_manager.recovery.is_recovery_enabled(tunnel.id) is False
+
+    def test_validate_tunnel_chain_no_cycle(self, tunnel_manager, mock_chisel_process):
+        """Test validating tunnel chain without cycles."""
+        # Create parent tunnel
+        parent = tunnel_manager.create_tunnel(
+            name="parent-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(parent.id)
+
+        # Create child tunnel
+        child = tunnel_manager.create_tunnel(
+            name="child-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8081,
+            remote_host="10.0.0.100",
+            remote_port=9090,
+            parent_id=parent.id,
+        )
+
+        # Validate chain
+        assert tunnel_manager.validate_tunnel_chain(child.id) is True
+
+    def test_validate_tunnel_chain_no_parent(self, tunnel_manager):
+        """Test validating tunnel chain for tunnel without parent."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+
+        # Should be valid (no parent)
+        assert tunnel_manager.validate_tunnel_chain(tunnel.id) is True
+
+    def test_get_tunnel_chain(self, tunnel_manager, mock_chisel_process):
+        """Test getting tunnel chain."""
+        # Create chain: root -> parent -> child
+        root = tunnel_manager.create_tunnel(
+            name="root-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(root.id)
+
+        parent = tunnel_manager.create_tunnel(
+            name="parent-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8081,
+            remote_host="10.0.0.100",
+            remote_port=9090,
+            parent_id=root.id,
+        )
+        tunnel_manager.start_tunnel(parent.id)
+
+        child = tunnel_manager.create_tunnel(
+            name="child-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8082,
+            remote_host="172.16.0.100",
+            remote_port=9090,
+            parent_id=parent.id,
+        )
+
+        # Get chain
+        chain = tunnel_manager.get_tunnel_chain(child.id)
+
+        assert len(chain) == 3
+        assert chain[0].id == root.id
+        assert chain[1].id == parent.id
+        assert chain[2].id == child.id
+
+    def test_get_tunnel_chain_single(self, tunnel_manager):
+        """Test getting tunnel chain for single tunnel."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+
+        chain = tunnel_manager.get_tunnel_chain(tunnel.id)
+
+        assert len(chain) == 1
+        assert chain[0].id == tunnel.id
+
+    def test_handle_cascade_failure_with_recovery(self, tunnel_manager, mock_chisel_process):
+        """Test cascade failure handling with auto-recovery enabled."""
+        # Create parent and child
+        parent = tunnel_manager.create_tunnel(
+            name="parent-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(parent.id)
+
+        child = tunnel_manager.create_tunnel(
+            name="child-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8081,
+            remote_host="10.0.0.100",
+            remote_port=9090,
+            parent_id=parent.id,
+        )
+        tunnel_manager.start_tunnel(child.id)
+
+        # Enable auto-recovery for child
+        tunnel_manager.enable_auto_recovery(child.id)
+
+        # Mock schedule_recovery
+        with patch.object(tunnel_manager.recovery, "schedule_recovery") as mock_schedule:
+            # Handle cascade failure
+            tunnel_manager.handle_cascade_failure(parent.id)
+
+            # Should schedule recovery for child
+            mock_schedule.assert_called_once_with(child.id)
+
+    def test_handle_cascade_failure_without_recovery(self, tunnel_manager, mock_chisel_process):
+        """Test cascade failure handling without auto-recovery."""
+        # Create parent and child
+        parent = tunnel_manager.create_tunnel(
+            name="parent-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(parent.id)
+
+        child = tunnel_manager.create_tunnel(
+            name="child-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8081,
+            remote_host="10.0.0.100",
+            remote_port=9090,
+            parent_id=parent.id,
+        )
+        tunnel_manager.start_tunnel(child.id)
+
+        # Handle cascade failure (no recovery enabled)
+        tunnel_manager.handle_cascade_failure(parent.id)
+
+        # Child should be stopped and marked as disconnected
+        child_tunnel = tunnel_manager.get_tunnel(child.id)
+        assert child_tunnel.status == TunnelStatus.DISCONNECTED
+
+    def test_handle_cascade_failure_no_children(self, tunnel_manager):
+        """Test cascade failure handling with no children."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+
+        # Should not raise any errors
+        tunnel_manager.handle_cascade_failure(tunnel.id)
+
+    def test_health_check_triggers_recovery(self, tunnel_manager, mock_chisel_process):
+        """Test that health check triggers auto-recovery on failure."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="test-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(tunnel.id)
+        tunnel_manager.enable_auto_recovery(tunnel.id)
+
+        # Simulate process death
+        mock_chisel_process.return_value.is_alive.return_value = False
+
+        # Mock schedule_recovery
+        with patch.object(tunnel_manager.recovery, "schedule_recovery") as mock_schedule:
+            # Health check should fail and trigger recovery
+            with pytest.raises(TunnelDisconnected):
+                tunnel_manager.health_check(tunnel.id)
+
+            # Should schedule recovery
+            mock_schedule.assert_called_once_with(tunnel.id)
+
+    def test_start_ligolo_tunnel(self, tunnel_manager):
+        """Test starting a Ligolo-ng tunnel."""
+        tunnel = tunnel_manager.create_tunnel(
+            name="ligolo-tunnel",
+            tunnel_type=TunnelType.LIGOLO,
+            local_port=11601,
+            remote_host="192.168.1.100",
+            remote_port=11601,
+            config={
+                "mode": "agent",
+                "ignore_cert": True,
+            },
+        )
+
+        with patch("amp.core.tunnel.manager.LigoloProcess") as mock_ligolo:
+            process = Mock(spec=LigoloProcess)
+            process.start.return_value = 12345
+            process.is_alive.return_value = True
+            mock_ligolo.return_value = process
+
+            started = tunnel_manager.start_tunnel(tunnel.id)
+
+            assert started.status == TunnelStatus.ACTIVE
+            assert started.process_pid == 12345
+            mock_ligolo.assert_called_once()
+
+    def test_start_tunnel_validates_parent_active(self, tunnel_manager, mock_chisel_process):
+        """Test that starting tunnel validates parent is active."""
+        # Create parent and start it
+        parent = tunnel_manager.create_tunnel(
+            name="parent-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8080,
+            remote_host="192.168.1.100",
+            remote_port=9090,
+        )
+        tunnel_manager.start_tunnel(parent.id)
+
+        # Create child while parent is active
+        child = tunnel_manager.create_tunnel(
+            name="child-tunnel",
+            tunnel_type=TunnelType.CHISEL,
+            local_port=8081,
+            remote_host="10.0.0.100",
+            remote_port=9090,
+            parent_id=parent.id,
+        )
+
+        # Stop parent
+        tunnel_manager.stop_tunnel(parent.id)
+
+        # Try to start child (should fail because parent is not active)
+        with pytest.raises(TunnelCreationFailed) as exc_info:
+            tunnel_manager.start_tunnel(child.id)
+
+        assert "not active" in str(exc_info.value)
+        assert exc_info.value.retry_possible is False
 
 
 class TestChiselProcess:

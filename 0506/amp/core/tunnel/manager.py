@@ -17,6 +17,8 @@ from amp.storage.repository import TunnelRepository
 from amp.storage.schema import Tunnel
 
 from .chisel import ChiselProcess
+from .ligolo import LigoloProcess
+from .recovery import TunnelRecovery
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,8 @@ class TunnelManager:
             database: Database instance for persistence
         """
         self.database = database
-        self._processes: dict[str, ChiselProcess] = {}
+        self._processes: dict[str, ChiselProcess | LigoloProcess] = {}
+        self.recovery = TunnelRecovery(self)
 
     def create_tunnel(
         self,
@@ -122,26 +125,48 @@ class TunnelManager:
                 logger.warning(f"Tunnel {tunnel_id} already active")
                 return tunnel
 
-            # Only support Chisel for now
-            if tunnel.tunnel_type != TunnelType.CHISEL:
-                raise TunnelCreationFailed(
-                    f"Tunnel type {tunnel.tunnel_type} not yet supported",
-                    retry_possible=False,
-                )
+            # Validate parent tunnel is active if specified
+            if tunnel.parent_tunnel_id:
+                parent = repo.get_or_raise(tunnel.parent_tunnel_id)
+                if parent.status != TunnelStatus.ACTIVE:
+                    raise TunnelCreationFailed(
+                        f"Parent tunnel {tunnel.parent_tunnel_id} is not active",
+                        retry_possible=False,
+                    )
 
-            # Create and start Chisel process
+            # Create process based on tunnel type
             try:
-                process = ChiselProcess(
-                    chisel_binary=settings.tunnel.chisel_binary,
-                    mode="client",
-                    local_host=tunnel.local_host,
-                    local_port=tunnel.local_port,
-                    remote_host=tunnel.remote_host,
-                    remote_port=tunnel.remote_port,
-                    auth=tunnel.config.get("auth"),
-                    keepalive=tunnel.config.get("keepalive", 30),
-                    extra_args=tunnel.config.get("extra_args", []),
-                )
+                if tunnel.tunnel_type == TunnelType.CHISEL:
+                    process = ChiselProcess(
+                        chisel_binary=settings.tunnel.chisel_binary,
+                        mode="client",
+                        local_host=tunnel.local_host,
+                        local_port=tunnel.local_port,
+                        remote_host=tunnel.remote_host,
+                        remote_port=tunnel.remote_port,
+                        auth=tunnel.config.get("auth"),
+                        keepalive=tunnel.config.get("keepalive", 30),
+                        extra_args=tunnel.config.get("extra_args", []),
+                    )
+                elif tunnel.tunnel_type == TunnelType.LIGOLO:
+                    process = LigoloProcess(
+                        ligolo_binary=settings.tunnel.ligolo_binary,
+                        mode=tunnel.config.get("mode", "agent"),
+                        interface=tunnel.config.get("interface"),
+                        routes=tunnel.config.get("routes", []),
+                        proxy_host=tunnel.remote_host,
+                        proxy_port=tunnel.remote_port,
+                        listen_addr=tunnel.local_host,
+                        listen_port=tunnel.local_port,
+                        ignore_cert=tunnel.config.get("ignore_cert", True),
+                        selfcert=tunnel.config.get("selfcert", True),
+                        extra_args=tunnel.config.get("extra_args", []),
+                    )
+                else:
+                    raise TunnelCreationFailed(
+                        f"Tunnel type {tunnel.tunnel_type} not supported",
+                        retry_possible=False,
+                    )
 
                 pid = process.start()
 
@@ -306,6 +331,14 @@ class TunnelManager:
                     # Clean up process reference
                     del self._processes[tunnel_id]
 
+                    # Trigger auto-recovery if enabled
+                    if self.recovery.is_recovery_enabled(tunnel_id):
+                        logger.info(f"Triggering auto-recovery for tunnel {tunnel_id}")
+                        self.recovery.schedule_recovery(tunnel_id)
+
+                    # Handle cascade failure for child tunnels
+                    self.handle_cascade_failure(tunnel_id)
+
                     raise TunnelDisconnected(
                         tunnel_id,
                         tunnel.last_heartbeat or tunnel.updated_at,
@@ -398,6 +431,137 @@ class TunnelManager:
 
             logger.info(f"Cleaned up {cleaned} stale tunnels")
             return cleaned
+
+    def enable_auto_recovery(self, tunnel_id: str) -> None:
+        """Enable auto-recovery for a tunnel.
+
+        Args:
+            tunnel_id: Tunnel ID to enable recovery for
+
+        Raises:
+            TunnelNotFound: If tunnel not found
+        """
+        self.get_tunnel(tunnel_id)  # Validate tunnel exists
+        self.recovery.enable_auto_recovery(tunnel_id)
+
+    def disable_auto_recovery(self, tunnel_id: str) -> None:
+        """Disable auto-recovery for a tunnel.
+
+        Args:
+            tunnel_id: Tunnel ID to disable recovery for
+        """
+        self.recovery.disable_auto_recovery(tunnel_id)
+
+    def handle_cascade_failure(self, parent_id: str) -> None:
+        """Handle cascade failure when parent tunnel fails.
+
+        Args:
+            parent_id: Parent tunnel ID that failed
+        """
+        with self.database.session() as session:
+            repo = TunnelRepository(session)
+            children = repo.get_children(parent_id)
+
+            if not children:
+                return
+
+            logger.warning(
+                f"Handling cascade failure for {len(children)} child tunnels "
+                f"of parent {parent_id}"
+            )
+
+            for child in children:
+                try:
+                    if self.recovery.is_recovery_enabled(child.id):
+                        # Try to recover child tunnel
+                        logger.info(
+                            f"Scheduling recovery for child tunnel {child.id} "
+                            f"after parent {parent_id} failure"
+                        )
+                        self.recovery.schedule_recovery(child.id)
+                    else:
+                        # Stop child tunnel
+                        logger.info(
+                            f"Stopping child tunnel {child.id} "
+                            f"after parent {parent_id} failure"
+                        )
+                        self.stop_tunnel(child.id)
+
+                        # Update status to disconnected
+                        repo.update_status(child.id, TunnelStatus.DISCONNECTED)
+                        session.commit()
+
+                except Exception as e:
+                    logger.error(
+                        f"Error handling cascade failure for child tunnel {child.id}: {e}"
+                    )
+
+    def validate_tunnel_chain(self, tunnel_id: str) -> bool:
+        """Validate tunnel chain has no cycles.
+
+        Args:
+            tunnel_id: Tunnel ID to validate
+
+        Returns:
+            True if chain is valid (no cycles)
+
+        Raises:
+            TunnelNotFound: If tunnel not found
+        """
+        with self.database.session() as session:
+            repo = TunnelRepository(session)
+            tunnel = repo.get_or_raise(tunnel_id)
+
+            visited = set()
+            current_id = tunnel.parent_tunnel_id
+
+            while current_id:
+                if current_id in visited:
+                    logger.error(
+                        f"Cycle detected in tunnel chain for tunnel {tunnel_id}: "
+                        f"visited {visited}, current {current_id}"
+                    )
+                    return False
+
+                visited.add(current_id)
+
+                try:
+                    parent = repo.get_or_raise(current_id)
+                    current_id = parent.parent_tunnel_id
+                except TunnelNotFound:
+                    logger.error(
+                        f"Parent tunnel {current_id} not found in chain for tunnel {tunnel_id}"
+                    )
+                    return False
+
+            logger.debug(f"Tunnel chain validated for tunnel {tunnel_id}: {visited}")
+            return True
+
+    def get_tunnel_chain(self, tunnel_id: str) -> list[TunnelModel]:
+        """Get the full tunnel chain from root to specified tunnel.
+
+        Args:
+            tunnel_id: Tunnel ID to get chain for
+
+        Returns:
+            List of tunnels from root to specified tunnel
+
+        Raises:
+            TunnelNotFound: If tunnel not found
+        """
+        with self.database.session() as session:
+            repo = TunnelRepository(session)
+            tunnel = repo.get_or_raise(tunnel_id)
+
+            chain = [tunnel]
+            current_id = tunnel.parent_tunnel_id
+
+            while current_id:
+                parent = repo.get_or_raise(current_id)
+                chain.insert(0, parent)
+                current_id = parent.parent_tunnel_id
+
+            return chain
 
     def shutdown(self) -> None:
         """Shutdown tunnel manager (stop all tunnels)."""
