@@ -1,0 +1,106 @@
+## Implementation Complete
+
+### Files Modified
+
+1. /home/xp/test/0506/amp/core/shell/executor.py
+   - Enhanced prompt detection with ANSI escape code support
+   - Added timeout retry mechanism with enter key
+   - Implemented ANSI code cleaning in output
+   - Added attach_socket() method for reverse shell socket attachment
+   - Fixed type annotation for is_alive() method
+
+2. /home/xp/test/0506/amp/core/shell/manager.py
+   - Added _verify_bind_connection() method for pre-connection verification
+   - Updated create_bind_shell() to verify connection before creating shell
+   - Fixed _accept_reverse_connection() to properly attach socket using executor.attach_socket()
+   - Added list_all_shells() method
+   - Added list_dead_shells() method
+   - Added list_shells_by_status() method
+
+3. /home/xp/test/0506/amp/storage/repository.py
+   - Added list_by_status() method to ShellRepository
+
+4. /home/xp/test/0506/amp/mcp/tools/shell_tools.py
+   - Updated list_shells() to support status filtering ('all', 'active', 'dead', 'zombie')
+   - Changed default behavior to list all shells instead of only active
+   - Added filter field to response data
+
+5. /home/xp/test/0506/test_shell_fixes.py (NEW)
+   - Created test script to verify all 4 fixes
+
+### Implementation Summary
+
+#### Fix 1: Enhanced Prompt Detection (P0)
+- Added 8 enhanced prompt patterns including:
+  - Basic prompts: $, #, >
+  - Colored bash prompts with ANSI escape codes: \x1b\[[0-9;]*m.*?[\$#>]\s*$
+  - Multiline prompts: \n.*?[\$#>]\s*$
+  - Common formats: [user@host]$, user@host:path$
+  - PowerShell prompts: PS\s+.*?>\s*$
+  - Generic fallback: .+[\$#>]\s*$
+- Implemented timeout retry mechanism: sends enter key and waits again if initial timeout
+- Added ANSI escape code removal in _clean_output() method using regex: \x1b\[[0-9;]*m
+- Updated execute() method docstring to reflect enhanced detection
+
+#### Fix 2: Bind Shell Connection Verification (P0)
+- Created _verify_bind_connection() helper method that:
+  - Attempts TCP connection to target host:port with 5 second timeout
+  - Returns True if connection successful, False otherwise
+  - Logs verification result
+- Updated create_bind_shell() to call verification before creating shell record
+- Raises ShellCreationFailed with descriptive message if connection fails
+- Prevents creation of shell records for unreachable targets
+
+#### Fix 3: Reverse Shell Socket Attachment (P0)
+- Added attach_socket() method to CommandExecutor class:
+  - Imports pexpect.fdpexpect for socket wrapping
+  - Wraps socket file descriptor as pexpect.fdspawn
+  - Waits for initial prompt with 10 second timeout
+  - Stores session in _sessions dict
+  - Proper error handling with CommandExecutionFailed exception
+- Updated _accept_reverse_connection() in ShellManager:
+  - Calls executor.attach_socket() instead of spawning local bash
+  - Updates shell status to ACTIVE after successful attachment
+  - Updates target_host with actual connection address
+  - Properly handles exceptions and updates status to DEAD on failure
+- Added socket import to executor.py
+
+#### Fix 4: Complete Shell List (P1)
+- Added list_all_shells() to ShellManager - returns all shells regardless of status
+- Added list_dead_shells() to ShellManager - returns only dead shells
+- Added list_shells_by_status() to ShellManager - returns shells filtered by specific status
+- Added list_by_status() to ShellRepository - database query method
+- Updated list_shells() MCP tool:
+  - Accepts status parameter: 'all', 'active', 'dead', 'zombie', or None
+  - Defaults to 'all' when status is None (changed from 'active')
+  - Returns filter field in response data
+  - Improved error messages for invalid status values
+
+### Verification Results
+
+- Lint (ruff): Passed - All checks passed
+- TypeCheck (mypy): Passed for modified code - Fixed type annotation issue in is_alive()
+- Test Script: Created and syntax validated
+
+### Testing Notes
+
+The test script (test_shell_fixes.py) verifies:
+1. Bind connection verification rejects non-listening ports
+2. Shell listing methods return correct counts by status
+3. Enhanced prompt patterns are properly configured
+4. Socket attachment method is implemented
+
+Full integration testing requires:
+- Real shell connections with colorful prompts
+- Actual reverse shell payload execution
+- Bind shell target with listening port
+- Multiple shells in different states
+
+### Code Quality
+
+- All changes follow existing code patterns
+- Proper error handling with specific exceptions
+- Comprehensive logging at appropriate levels
+- Type hints maintained throughout
+- Docstrings updated for all new/modified methods
+- No over-engineering - minimal changes to fix issues

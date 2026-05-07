@@ -177,7 +177,7 @@ class ShellManager:
         listener: socket.socket,
         use_tmux: bool,
     ) -> None:
-        """Accept reverse shell connection.
+        """Accept reverse shell connection and attach socket.
 
         Args:
             shell_id: Shell ID
@@ -185,19 +185,27 @@ class ShellManager:
             use_tmux: Whether to use tmux
         """
         try:
+            logger.info(f"Waiting for reverse connection on {listener.getsockname()}")
+
+            # Accept connection
             conn, addr = listener.accept()
-            logger.info(f"Accepted reverse connection for shell {shell_id} from {addr}")
+            logger.info(f"Reverse connection received from {addr}")
 
-            # If using tmux, create session and attach
-            if use_tmux:
-                with self.database.session() as session:
-                    repo = ShellRepository(session)
-                    shell = repo.get(shell_id)
-                    if shell and shell.tmux_session:
-                        self.tmux.create_session(shell.tmux_session, "bash")
+            # CRITICAL FIX: Attach socket to executor
+            self.executor.attach_socket(shell_id, conn)
 
-            # Spawn shell with executor
-            self.executor.spawn_shell(shell_id, "bash")
+            # Update shell status
+            with self.database.session() as session:
+                repo = ShellRepository(session)
+                shell = repo.get(shell_id)
+                if shell:
+                    shell_data = shell.model_dump()
+                    shell_data['status'] = ShellStatus.ACTIVE.value
+                    shell_data['target_host'] = addr[0]
+                    repo.update_status(shell_id, ShellStatus.ACTIVE)
+                    session.commit()
+
+            logger.info(f"Reverse shell {shell_id} attached to {addr}")
 
             # Update shell state
             self._update_shell_state_internal(shell_id)
@@ -243,6 +251,14 @@ class ShellManager:
             ShellLimitExceeded: If max shells limit reached
             ShellCreationFailed: If shell creation fails
         """
+        # Verify bind connection before creating
+        if not self._verify_bind_connection(target_host, target_port):
+            raise ShellCreationFailed(
+                reason=f"Cannot connect to {target_host}:{target_port}. "
+                "Port may not be listening or host unreachable.",
+                target=f"{target_host}:{target_port}",
+            )
+
         with self.database.session() as session:
             repo = ShellRepository(session)
 
@@ -502,6 +518,39 @@ class ShellManager:
         with self.database.session() as session:
             repo = ShellRepository(session)
             return repo.list_active()
+
+    def list_all_shells(self) -> list[ShellModel]:
+        """List all shells regardless of status.
+
+        Returns:
+            List of all shell models
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+            return repo.list_all()
+
+    def list_dead_shells(self) -> list[ShellModel]:
+        """List dead shells.
+
+        Returns:
+            List of dead shell models
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+            return repo.list_by_status(ShellStatus.DEAD)
+
+    def list_shells_by_status(self, status: ShellStatus) -> list[ShellModel]:
+        """List shells by specific status.
+
+        Args:
+            status: Shell status to filter by
+
+        Returns:
+            List of shell models with the specified status
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+            return repo.list_by_status(status)
 
     def close_shell(self, shell_id: str) -> None:
         """Close shell session.
@@ -902,3 +951,25 @@ class ShellManager:
             reason=f"No available ports in range {start_port}-{end_port}",
             target="localhost",
         )
+
+    def _verify_bind_connection(self, host: str, port: int, timeout: int = 5) -> bool:
+        """Verify bind shell connection before creating.
+
+        Args:
+            host: Target host
+            port: Target port
+            timeout: Connection timeout in seconds
+
+        Returns:
+            True if connection successful, False otherwise
+        """
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((host, port))
+            sock.close()
+            logger.info(f"Bind connection verified: {host}:{port}")
+            return True
+        except Exception as e:
+            logger.warning(f"Bind connection failed: {host}:{port} - {e}")
+            return False

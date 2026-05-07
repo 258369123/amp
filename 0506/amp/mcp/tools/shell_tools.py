@@ -360,7 +360,7 @@ async def list_shells(status: str | None = None) -> dict[str, Any]:
     """List all shells, optionally filtered by status.
 
     Args:
-        status: Optional status filter (active, dead, zombie)
+        status: Optional status filter ('active', 'dead', 'zombie', 'all', or None defaults to 'all')
 
     Returns:
         Response dict with list of shells
@@ -373,26 +373,25 @@ async def list_shells(status: str | None = None) -> dict[str, Any]:
                 "error_type": "initialization_error",
             }
 
-        # Get shells based on filter
-        if status:
-            # Validate status
-            try:
-                status_enum = ShellStatus(status)
-            except ValueError:
-                return {
-                    "success": False,
-                    "error": f"Invalid status: {status}",
-                    "error_type": "validation_error",
-                }
+        # Default to 'all' if status is None
+        if status is None:
+            status = 'all'
 
-            if status_enum == ShellStatus.ACTIVE:
-                shells = _shell_manager.list_active_shells()
-            else:
-                # Get all active and filter (we don't have list_all method)
-                shells = _shell_manager.list_active_shells()
-                shells = [s for s in shells if s.status == status_enum]
-        else:
+        # Get shells based on filter
+        if status == 'all':
+            shells = _shell_manager.list_all_shells()
+        elif status == 'active':
             shells = _shell_manager.list_active_shells()
+        elif status == 'dead':
+            shells = _shell_manager.list_dead_shells()
+        elif status == 'zombie':
+            shells = _shell_manager.list_shells_by_status(ShellStatus.ZOMBIE)
+        else:
+            return {
+                "success": False,
+                "error": f"Invalid status filter: {status}. Use 'all', 'active', 'dead', or 'zombie'",
+                "error_type": "validation_error",
+            }
 
         # Convert to dict format
         shell_list = []
@@ -419,6 +418,7 @@ async def list_shells(status: str | None = None) -> dict[str, Any]:
             "data": {
                 "shells": shell_list,
                 "count": len(shell_list),
+                "filter": status,
             },
         }
 

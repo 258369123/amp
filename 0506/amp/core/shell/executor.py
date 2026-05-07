@@ -2,6 +2,7 @@
 
 import logging
 import re
+import socket
 import time
 
 import pexpect
@@ -41,11 +42,27 @@ class CommandResult:
 class CommandExecutor:
     """Execute commands in shell sessions using pexpect."""
 
-    # Common shell prompts
+    # Enhanced prompt patterns for better detection
     PROMPT_PATTERNS = [
-        r"[\$#>]\s*$",  # Generic shell prompt
-        r".*@.*:.*[\$#]\s*$",  # user@host:path$
-        r".*>\s*$",  # Windows-style prompt
+        # Basic prompts
+        r'[\$#>]\s*$',
+
+        # Colored bash prompts (ANSI escape codes)
+        r'\x1b\[[0-9;]*m.*?[\$#>]\s*$',
+
+        # Multiline prompts
+        r'\n.*?[\$#>]\s*$',
+
+        # Common formats
+        r'\[.*?\][\$#>]\s*$',  # [user@host]$
+        r'.*?@.*?:.*?[\$#>]\s*$',  # user@host:path$
+
+        # PowerShell
+        r'PS\s+.*?>\s*$',
+
+        # Generic fallback
+        r'.+[\$#>]\s*$',
+
         pexpect.TIMEOUT,
         pexpect.EOF,
     ]
@@ -53,6 +70,42 @@ class CommandExecutor:
     def __init__(self) -> None:
         """Initialize command executor."""
         self._sessions: dict[str, pexpect.spawn] = {}
+
+    def attach_socket(self, shell_id: str, sock: socket.socket) -> None:
+        """Attach a socket as shell I/O for reverse shells.
+
+        Args:
+            shell_id: Shell ID
+            sock: Connected socket
+
+        Raises:
+            CommandExecutionFailed: If socket attachment fails
+        """
+        try:
+            import pexpect.fdpexpect
+
+            # Wrap socket as file descriptor
+            child = pexpect.fdpexpect.fdspawn(
+                sock.fileno(),
+                encoding='utf-8',
+                codec_errors='ignore',
+                timeout=30,
+            )
+
+            # Wait for initial prompt
+            child.expect(self.PROMPT_PATTERNS, timeout=10)
+
+            self._sessions[shell_id] = child
+
+            logger.info(f"Socket attached to shell {shell_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to attach socket: {e}")
+            raise CommandExecutionFailed(
+                command="attach_socket",
+                exit_code=-1,
+                stderr=f"Socket attachment failed: {e}",
+            ) from e
 
     def spawn_shell(self, shell_id: str, command: str = "bash") -> None:
         """Spawn a new shell process.
@@ -88,7 +141,7 @@ class CommandExecutor:
         command: str,
         timeout: int = 30,
     ) -> CommandResult:
-        """Execute command in shell session.
+        """Execute command in shell session with enhanced prompt detection.
 
         Args:
             shell_id: Shell ID
@@ -127,7 +180,16 @@ class CommandExecutor:
 
             # Check for timeout or EOF
             if index == len(self.PROMPT_PATTERNS) - 2:  # TIMEOUT
-                raise ShellTimeout(command=command, timeout=timeout)
+                # Try sending enter and wait again
+                logger.debug("Timeout detected, sending enter to trigger prompt")
+                child.sendline('')
+                try:
+                    index = child.expect(self.PROMPT_PATTERNS, timeout=5)
+                    if index == len(self.PROMPT_PATTERNS) - 2:
+                        raise ShellTimeout(command=command, timeout=timeout)
+                except pexpect.TIMEOUT as e:
+                    raise ShellTimeout(command=command, timeout=timeout) from e
+
             if index == len(self.PROMPT_PATTERNS) - 1:  # EOF
                 raise CommandExecutionFailed(
                     command=command,
@@ -138,7 +200,7 @@ class CommandExecutor:
             # Get exit code
             exit_code = self._get_exit_code(child, timeout=5)
 
-            # Parse output (remove command echo)
+            # Parse output (remove command echo and ANSI codes)
             stdout = self._clean_output(output, command)
 
             logger.debug(
@@ -196,7 +258,7 @@ class CommandExecutor:
         return 0
 
     def _clean_output(self, output: str, command: str) -> str:
-        """Clean command output by removing echo and prompts.
+        """Clean command output by removing echo, prompts, and ANSI codes.
 
         Args:
             output: Raw output
@@ -205,6 +267,10 @@ class CommandExecutor:
         Returns:
             Cleaned output
         """
+        # Remove ANSI escape codes
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        output = ansi_escape.sub('', output)
+
         lines = output.split("\n")
 
         # Remove first line if it's the command echo
@@ -247,4 +313,4 @@ class CommandExecutor:
         """
         if shell_id not in self._sessions:
             return False
-        return self._sessions[shell_id].isalive()
+        return bool(self._sessions[shell_id].isalive())

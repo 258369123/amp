@@ -141,6 +141,20 @@ class ShellRepository:
         shells = self.session.query(Shell).all()
         return [self._to_model(s) for s in shells]
 
+    def list_by_status(self, status: ShellStatus) -> list[ShellModel]:
+        """List shells by status.
+
+        Args:
+            status: Shell status to filter by
+
+        Returns:
+            List of shells with the specified status
+        """
+        shells = self.session.query(Shell).filter(
+            Shell.status == status.value
+        ).all()
+        return [self._to_model(s) for s in shells]
+
     def update_status(self, shell_id: str, status: ShellStatus) -> ShellModel:
         """Update shell status."""
         shell = self.session.query(Shell).filter(Shell.id == shell_id).first()
