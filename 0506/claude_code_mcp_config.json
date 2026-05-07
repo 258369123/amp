@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "amp": {
+      "command": "amp-mcp",
+      "cwd": "/home/xp/test/0506",
+      "env": {
+        "PYTHONPATH": "/home/xp/test/0506"
+      }
+    }
+  }
+}
