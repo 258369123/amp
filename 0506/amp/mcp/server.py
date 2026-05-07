@@ -17,7 +17,7 @@ from amp.mcp.protocol import (
     ToolRequest,
     ToolResponse,
 )
-from amp.mcp.tools import tool_registry
+from amp.mcp.tool_registry import tool_registry
 
 logger = logging.getLogger(__name__)
 
