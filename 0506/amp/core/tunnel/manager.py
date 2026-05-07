@@ -17,7 +17,10 @@ from amp.storage.repository import TunnelRepository
 from amp.storage.schema import Tunnel
 
 from .chisel import ChiselProcess
+from .chisel_server import ChiselServer
 from .ligolo import LigoloProcess
+from .ligolo_proxy import LigoloProxy
+from .models import SessionInfo, TunnelServerType
 from .recovery import TunnelRecovery
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ class TunnelManager:
         """
         self.database = database
         self._processes: dict[str, ChiselProcess | LigoloProcess] = {}
+        self._servers: dict[str, ChiselServer | LigoloProxy] = {}
         self.recovery = TunnelRecovery(self)
 
     def create_tunnel(
@@ -563,8 +567,145 @@ class TunnelManager:
 
             return chain
 
+    def start_chisel_server(
+        self,
+        port: int,
+        host: str = "0.0.0.0",
+        auth: str | None = None,
+        keepalive: int = 30,
+    ) -> ChiselServer:
+        """Start a Chisel server to manage client connections.
+
+        Args:
+            port: Port to listen on
+            host: Host to bind to (default: 0.0.0.0)
+            auth: Authentication string (user:pass)
+            keepalive: Keepalive interval in seconds
+
+        Returns:
+            ChiselServer instance
+
+        Raises:
+            TunnelCreationFailed: If server fails to start
+        """
+        server_key = f"chisel:{port}"
+
+        if server_key in self._servers:
+            logger.warning(f"Chisel server already running on port {port}")
+            return self._servers[server_key]
+
+        server = ChiselServer(
+            chisel_binary=settings.tunnel.chisel_binary,
+            port=port,
+            host=host,
+            auth=auth,
+            keepalive=keepalive,
+        )
+
+        server.start()
+        self._servers[server_key] = server
+
+        logger.info(f"Started Chisel server on {host}:{port}")
+        return server
+
+    def start_ligolo_proxy(
+        self,
+        port: int,
+        host: str = "0.0.0.0",
+        selfcert: bool = True,
+    ) -> LigoloProxy:
+        """Start a Ligolo-ng proxy to manage agent connections.
+
+        Args:
+            port: Port to listen on
+            host: Host to bind to (default: 0.0.0.0)
+            selfcert: Use self-signed certificate
+
+        Returns:
+            LigoloProxy instance
+
+        Raises:
+            TunnelCreationFailed: If proxy fails to start
+        """
+        server_key = f"ligolo:{port}"
+
+        if server_key in self._servers:
+            logger.warning(f"Ligolo proxy already running on port {port}")
+            return self._servers[server_key]
+
+        proxy = LigoloProxy(
+            ligolo_binary=settings.tunnel.ligolo_binary,
+            port=port,
+            host=host,
+            selfcert=selfcert,
+        )
+
+        proxy.start()
+        self._servers[server_key] = proxy
+
+        logger.info(f"Started Ligolo proxy on {host}:{port}")
+        return proxy
+
+    def list_all_sessions(self) -> list[SessionInfo]:
+        """List all sessions from all tunnel servers.
+
+        Returns:
+            List of all session information
+        """
+        all_sessions = []
+
+        for server_key, server in self._servers.items():
+            try:
+                sessions = server.list_sessions()
+                # Add server type to metadata
+                server_type = server_key.split(":")[0]
+                for session in sessions:
+                    session.metadata["server_type"] = server_type
+                    session.metadata["server_key"] = server_key
+                all_sessions.extend(sessions)
+            except Exception as e:
+                logger.error(f"Error listing sessions for {server_key}: {e}")
+
+        return all_sessions
+
+    def stop_chisel_server(self, port: int) -> None:
+        """Stop a Chisel server.
+
+        Args:
+            port: Port the server is listening on
+        """
+        server_key = f"chisel:{port}"
+
+        if server_key not in self._servers:
+            logger.warning(f"No Chisel server running on port {port}")
+            return
+
+        server = self._servers[server_key]
+        server.stop()
+        del self._servers[server_key]
+
+        logger.info(f"Stopped Chisel server on port {port}")
+
+    def stop_ligolo_proxy(self, port: int) -> None:
+        """Stop a Ligolo-ng proxy.
+
+        Args:
+            port: Port the proxy is listening on
+        """
+        server_key = f"ligolo:{port}"
+
+        if server_key not in self._servers:
+            logger.warning(f"No Ligolo proxy running on port {port}")
+            return
+
+        proxy = self._servers[server_key]
+        proxy.stop()
+        del self._servers[server_key]
+
+        logger.info(f"Stopped Ligolo proxy on port {port}")
+
     def shutdown(self) -> None:
-        """Shutdown tunnel manager (stop all tunnels)."""
+        """Shutdown tunnel manager (stop all tunnels and servers)."""
         logger.info("Shutting down tunnel manager")
 
         # Stop all active tunnels
@@ -575,4 +716,14 @@ class TunnelManager:
                 logger.error(f"Error stopping tunnel {tunnel_id}: {e}")
 
         self._processes.clear()
+
+        # Stop all servers
+        for server_key in list(self._servers.keys()):
+            try:
+                server = self._servers[server_key]
+                server.stop()
+            except Exception as e:
+                logger.error(f"Error stopping server {server_key}: {e}")
+
+        self._servers.clear()
         logger.info("Tunnel manager shutdown complete")

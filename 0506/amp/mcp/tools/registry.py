@@ -220,6 +220,127 @@ def register_tunnel_tools() -> None:
         ],
     )
 
+    # New tunnel server management tools
+    tool_registry.register_tool(
+        name="start_tunnel_server",
+        func=tunnel_tools.start_tunnel_server,
+        description="Start a tunnel server (Chisel or Ligolo-ng) to manage client/agent connections",
+        parameters=[
+            ToolParameter(
+                name="tunnel_type",
+                type=ParameterType.STRING,
+                description="Server type (chisel, ligolo)",
+                required=True,
+            ),
+            ToolParameter(
+                name="port",
+                type=ParameterType.INTEGER,
+                description="Port to listen on",
+                required=True,
+            ),
+            ToolParameter(
+                name="host",
+                type=ParameterType.STRING,
+                description="Host to bind to (default: 0.0.0.0)",
+                required=False,
+                default="0.0.0.0",
+            ),
+            ToolParameter(
+                name="auth",
+                type=ParameterType.STRING,
+                description="Authentication string for Chisel (user:pass)",
+                required=False,
+            ),
+        ],
+    )
+
+    tool_registry.register_tool(
+        name="list_tunnel_sessions",
+        func=tunnel_tools.list_tunnel_sessions,
+        description="List all active sessions from tunnel servers",
+        parameters=[
+            ToolParameter(
+                name="tunnel_type",
+                type=ParameterType.STRING,
+                description="Optional filter by server type (chisel, ligolo)",
+                required=False,
+            ),
+        ],
+    )
+
+    tool_registry.register_tool(
+        name="add_port_forward",
+        func=tunnel_tools.add_port_forward,
+        description="Add a port forward to a Ligolo-ng agent session",
+        parameters=[
+            ToolParameter(
+                name="session_id",
+                type=ParameterType.STRING,
+                description="Agent session ID",
+                required=True,
+            ),
+            ToolParameter(
+                name="listen_addr",
+                type=ParameterType.STRING,
+                description="Listen address (e.g., '0.0.0.0:8080')",
+                required=True,
+            ),
+            ToolParameter(
+                name="target_addr",
+                type=ParameterType.STRING,
+                description="Target address (e.g., 'localhost:80')",
+                required=True,
+            ),
+        ],
+    )
+
+    tool_registry.register_tool(
+        name="add_route",
+        func=tunnel_tools.add_route,
+        description="Add a network route to a Ligolo-ng agent session",
+        parameters=[
+            ToolParameter(
+                name="session_id",
+                type=ParameterType.STRING,
+                description="Agent session ID",
+                required=True,
+            ),
+            ToolParameter(
+                name="network",
+                type=ParameterType.STRING,
+                description="Network in CIDR notation (e.g., '10.0.0.0/24')",
+                required=True,
+            ),
+            ToolParameter(
+                name="interface",
+                type=ParameterType.STRING,
+                description="TUN interface name (default: 'ligolo')",
+                required=False,
+                default="ligolo",
+            ),
+        ],
+    )
+
+    tool_registry.register_tool(
+        name="stop_tunnel_server",
+        func=tunnel_tools.stop_tunnel_server,
+        description="Stop a tunnel server",
+        parameters=[
+            ToolParameter(
+                name="tunnel_type",
+                type=ParameterType.STRING,
+                description="Server type (chisel, ligolo)",
+                required=True,
+            ),
+            ToolParameter(
+                name="port",
+                type=ParameterType.INTEGER,
+                description="Port the server is listening on",
+                required=True,
+            ),
+        ],
+    )
+
 
 def register_shell_tools() -> None:
     """Register shell management tools."""

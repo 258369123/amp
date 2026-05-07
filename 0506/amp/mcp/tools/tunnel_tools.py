@@ -401,3 +401,352 @@ async def get_tunnel_status(tunnel_id: str) -> dict[str, Any]:
             "error": str(e),
             "error_type": "unexpected_error",
         }
+
+
+async def start_tunnel_server(
+    tunnel_type: str,
+    port: int,
+    host: str = "0.0.0.0",
+    auth: str | None = None,
+) -> dict[str, Any]:
+    """Start a tunnel server (Chisel or Ligolo-ng) to manage client/agent connections.
+
+    Args:
+        tunnel_type: Server type (chisel, ligolo)
+        port: Port to listen on
+        host: Host to bind to (default: 0.0.0.0)
+        auth: Authentication string for Chisel (user:pass)
+
+    Returns:
+        Response dict with server info
+    """
+    try:
+        if not _tunnel_manager:
+            return {
+                "success": False,
+                "error": "Tunnel manager not initialized",
+                "error_type": "initialization_error",
+            }
+
+        # Validate tunnel type
+        tunnel_type_lower = tunnel_type.lower()
+        if tunnel_type_lower not in ["chisel", "ligolo"]:
+            return {
+                "success": False,
+                "error": f"Invalid tunnel type: {tunnel_type}. Must be 'chisel' or 'ligolo'",
+                "error_type": "validation_error",
+            }
+
+        # Start appropriate server
+        if tunnel_type_lower == "chisel":
+            server = _tunnel_manager.start_chisel_server(
+                port=port,
+                host=host,
+                auth=auth,
+            )
+            server_type = "chisel"
+        else:  # ligolo
+            server = _tunnel_manager.start_ligolo_proxy(
+                port=port,
+                host=host,
+            )
+            server_type = "ligolo"
+
+        logger.info(f"Started {server_type} server on {host}:{port}")
+
+        return {
+            "success": True,
+            "data": {
+                "server_type": server_type,
+                "host": host,
+                "port": port,
+                "pid": server.pid,
+                "status": "running" if server.is_alive() else "stopped",
+            },
+        }
+
+    except TunnelCreationFailed as e:
+        logger.error(f"Failed to start tunnel server: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "creation_failed",
+            "retry_possible": e.retry_possible,
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error starting tunnel server: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unexpected_error",
+        }
+
+
+async def list_tunnel_sessions(tunnel_type: str | None = None) -> dict[str, Any]:
+    """List all active sessions from tunnel servers.
+
+    Args:
+        tunnel_type: Optional filter by server type (chisel, ligolo)
+
+    Returns:
+        Response dict with list of sessions
+    """
+    try:
+        if not _tunnel_manager:
+            return {
+                "success": False,
+                "error": "Tunnel manager not initialized",
+                "error_type": "initialization_error",
+            }
+
+        # Get all sessions
+        all_sessions = _tunnel_manager.list_all_sessions()
+
+        # Filter by type if specified
+        if tunnel_type:
+            tunnel_type_lower = tunnel_type.lower()
+            all_sessions = [
+                s for s in all_sessions
+                if s.metadata.get("server_type") == tunnel_type_lower
+            ]
+
+        # Convert to dict format
+        session_list = []
+        for session in all_sessions:
+            session_data = {
+                "session_id": session.session_id,
+                "status": session.status.value,
+                "remote_addr": session.remote_addr,
+                "connected_at": session.connected_at.isoformat(),
+                "server_type": session.metadata.get("server_type"),
+                "forwards": [
+                    {
+                        "listen_addr": f.listen_addr,
+                        "target_addr": f.target_addr,
+                        "protocol": f.protocol,
+                    }
+                    for f in session.forwards
+                ],
+                "routes": [
+                    {
+                        "network": r.network,
+                        "interface": r.interface,
+                    }
+                    for r in session.routes
+                ],
+            }
+            session_list.append(session_data)
+
+        logger.debug(f"Listed {len(session_list)} sessions (type={tunnel_type})")
+
+        return {
+            "success": True,
+            "data": {
+                "sessions": session_list,
+                "count": len(session_list),
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error listing sessions: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unexpected_error",
+        }
+
+
+async def add_port_forward(
+    session_id: str,
+    listen_addr: str,
+    target_addr: str,
+) -> dict[str, Any]:
+    """Add a port forward to a Ligolo-ng agent session.
+
+    Args:
+        session_id: Agent session ID
+        listen_addr: Listen address (e.g., "0.0.0.0:8080")
+        target_addr: Target address (e.g., "localhost:80")
+
+    Returns:
+        Response dict with forward status
+    """
+    try:
+        if not _tunnel_manager:
+            return {
+                "success": False,
+                "error": "Tunnel manager not initialized",
+                "error_type": "initialization_error",
+            }
+
+        # Find the ligolo proxy for this session
+        ligolo_proxy = None
+        for server_key, server in _tunnel_manager._servers.items():
+            if server_key.startswith("ligolo:"):
+                # Check if session exists in this proxy
+                sessions = server.list_sessions()
+                if any(s.session_id == session_id for s in sessions):
+                    ligolo_proxy = server
+                    break
+
+        if not ligolo_proxy:
+            return {
+                "success": False,
+                "error": f"Session {session_id} not found in any Ligolo proxy",
+                "error_type": "not_found",
+            }
+
+        # Add listener
+        success = ligolo_proxy.add_listener(session_id, listen_addr, target_addr)
+
+        if success:
+            logger.info(
+                f"Added port forward for session {session_id}: "
+                f"{listen_addr} => {target_addr}"
+            )
+            return {
+                "success": True,
+                "data": {
+                    "session_id": session_id,
+                    "listen_addr": listen_addr,
+                    "target_addr": target_addr,
+                },
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to add port forward",
+                "error_type": "operation_failed",
+            }
+
+    except Exception as e:
+        logger.error(f"Unexpected error adding port forward: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unexpected_error",
+        }
+
+
+async def add_route(
+    session_id: str,
+    network: str,
+    interface: str = "ligolo",
+) -> dict[str, Any]:
+    """Add a network route to a Ligolo-ng agent session.
+
+    Args:
+        session_id: Agent session ID
+        network: Network in CIDR notation (e.g., "10.0.0.0/24")
+        interface: TUN interface name (default: "ligolo")
+
+    Returns:
+        Response dict with route status
+    """
+    try:
+        if not _tunnel_manager:
+            return {
+                "success": False,
+                "error": "Tunnel manager not initialized",
+                "error_type": "initialization_error",
+            }
+
+        # Find the ligolo proxy for this session
+        ligolo_proxy = None
+        for server_key, server in _tunnel_manager._servers.items():
+            if server_key.startswith("ligolo:"):
+                # Check if session exists in this proxy
+                sessions = server.list_sessions()
+                if any(s.session_id == session_id for s in sessions):
+                    ligolo_proxy = server
+                    break
+
+        if not ligolo_proxy:
+            return {
+                "success": False,
+                "error": f"Session {session_id} not found in any Ligolo proxy",
+                "error_type": "not_found",
+            }
+
+        # Add route
+        success = ligolo_proxy.add_route(session_id, network, interface)
+
+        if success:
+            logger.info(
+                f"Added route for session {session_id}: {network} via {interface}"
+            )
+            return {
+                "success": True,
+                "data": {
+                    "session_id": session_id,
+                    "network": network,
+                    "interface": interface,
+                },
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to add route",
+                "error_type": "operation_failed",
+            }
+
+    except Exception as e:
+        logger.error(f"Unexpected error adding route: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unexpected_error",
+        }
+
+
+async def stop_tunnel_server(tunnel_type: str, port: int) -> dict[str, Any]:
+    """Stop a tunnel server.
+
+    Args:
+        tunnel_type: Server type (chisel, ligolo)
+        port: Port the server is listening on
+
+    Returns:
+        Response dict with stop status
+    """
+    try:
+        if not _tunnel_manager:
+            return {
+                "success": False,
+                "error": "Tunnel manager not initialized",
+                "error_type": "initialization_error",
+            }
+
+        # Validate tunnel type
+        tunnel_type_lower = tunnel_type.lower()
+        if tunnel_type_lower not in ["chisel", "ligolo"]:
+            return {
+                "success": False,
+                "error": f"Invalid tunnel type: {tunnel_type}. Must be 'chisel' or 'ligolo'",
+                "error_type": "validation_error",
+            }
+
+        # Stop appropriate server
+        if tunnel_type_lower == "chisel":
+            _tunnel_manager.stop_chisel_server(port)
+        else:  # ligolo
+            _tunnel_manager.stop_ligolo_proxy(port)
+
+        logger.info(f"Stopped {tunnel_type_lower} server on port {port}")
+
+        return {
+            "success": True,
+            "data": {
+                "server_type": tunnel_type_lower,
+                "port": port,
+                "message": "Server stopped successfully",
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error stopping tunnel server: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unexpected_error",
+        }
