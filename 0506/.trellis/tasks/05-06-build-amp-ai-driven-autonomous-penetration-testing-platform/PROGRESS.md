@@ -219,8 +219,29 @@ Phase 3 delivered:
 
 ## Phase 4: Integration (Week 7-8)
 
-### PR8: Network Topology (Next)
-- In-memory graph structure
-- Route calculation
-- Topology visualization (Mermaid)
-- Dependency tracking
+### PR8: Network Topology ✅ (Completed)
+**Commit**: 9c303ce
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ NetworkGraph (in-memory directed graph)
+- ✅ RouteCalculator (BFS optimal path finding)
+- ✅ TopologyVisualizer (Mermaid + ASCII diagrams)
+- ✅ Cycle detection (DFS algorithm)
+- ✅ Impact analysis (affected segments)
+- ✅ Route validation and status checking
+- ✅ Unit tests (35 tests, 100% pass rate)
+
+Files created:
+- amp/core/network/graph.py (NetworkGraph)
+- amp/core/network/router.py (RouteCalculator)
+- amp/core/network/visualizer.py (TopologyVisualizer)
+- amp/tests/unit/test_network_topology.py (35 tests)
+
+Test coverage: graph 96%, router 89%, visualizer 98%
+
+### PR9: MCP Server - Core (Next)
+- FastAPI server setup
+- MCP protocol implementation
+- Tool registration
+- Authentication
