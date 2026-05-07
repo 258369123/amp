@@ -232,7 +232,7 @@ async def execute_command(
     command: str,
     timeout: int = 30,
 ) -> dict[str, Any]:
-    """Execute command in shell session.
+    """Execute command in shell session and auto-record to database.
 
     Args:
         shell_id: Shell ID
@@ -271,6 +271,10 @@ async def execute_command(
             f"Executed command in shell {shell_id}: {command[:50]}... "
             f"(exit_code={result.exit_code})"
         )
+
+        # Auto-record to database (operation is already recorded by manager)
+        # The shell manager already creates Operation records, so we just
+        # need to ensure the operation_id is returned
 
         return {
             "success": True,

@@ -1,32 +1,24 @@
-"""Context query tools for MCP."""
+"""Context query tools for MCP - simplified with Blackboard pattern."""
 
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Global manager instances (initialized by registry)
-_similarity_search = None
-_prompt_builder = None
-_context_compressor = None
+# Global blackboard instance (initialized by registry)
+_blackboard = None
 
 
 def set_context_components(
-    similarity_search: Any,
-    prompt_builder: Any,
-    context_compressor: Any,
+    blackboard: Any,
 ) -> None:
-    """Set context component instances.
+    """Set blackboard instance.
 
     Args:
-        similarity_search: SimilaritySearch instance
-        prompt_builder: PromptBuilder instance
-        context_compressor: ContextCompressor instance
+        blackboard: Blackboard instance
     """
-    global _similarity_search, _prompt_builder, _context_compressor
-    _similarity_search = similarity_search
-    _prompt_builder = prompt_builder
-    _context_compressor = context_compressor
+    global _blackboard
+    _blackboard = blackboard
 
 
 async def get_relevant_operations(
@@ -36,67 +28,38 @@ async def get_relevant_operations(
     limit: int = 10,
     threshold: float = 0.5,
 ) -> dict[str, Any]:
-    """Get relevant operation history based on query.
+    """Get relevant operation history - simplified to recent operations.
 
     Args:
-        query: Query text to search for
+        query: Query text (ignored in simplified version)
         shell_id: Optional shell ID filter
         tunnel_id: Optional tunnel ID filter
         limit: Maximum number of operations to return
-        threshold: Minimum similarity threshold (0-1)
+        threshold: Minimum similarity threshold (ignored in simplified version)
 
     Returns:
-        Response dict with relevant operations
+        Response dict with recent operations
     """
     try:
-        if not _similarity_search:
+        if not _blackboard:
             return {
                 "success": False,
-                "error": "Similarity search not initialized",
+                "error": "Blackboard not initialized",
                 "error_type": "initialization_error",
             }
 
-        # Build context filter
-        context = {}
+        # Get current state
+        state = _blackboard.get_state()
+        operations = state.get("recent_operations", [])
+
+        # Simple filtering by shell_id if provided
         if shell_id:
-            context["shell_id"] = shell_id
-        if tunnel_id:
-            context["tunnel_id"] = tunnel_id
+            operations = [op for op in operations if op.get("shell_id") == shell_id]
 
-        # Search for similar commands
-        results = _similarity_search.find_similar_commands(
-            query=query,
-            top_k=limit * 2,  # Get more candidates for ranking
-            threshold=threshold,
-        )
+        # Limit results
+        operations = operations[:limit]
 
-        # Rank by relevance
-        ranked_results = _similarity_search.rank_by_relevance(
-            results=results,
-            query=query,
-            recency_weight=0.3,
-        )
-
-        # Limit to requested count
-        final_results = ranked_results[:limit]
-
-        # Format results
-        operations = []
-        for result in final_results:
-            operations.append({
-                "operation_id": result.get("id"),
-                "command": result.get("command"),
-                "stdout": result.get("stdout", "")[:500],  # Truncate output
-                "exit_code": result.get("exit_code"),
-                "shell_id": result.get("metadata", {}).get("shell_id"),
-                "tunnel_id": result.get("metadata", {}).get("tunnel_id"),
-                "timestamp": result.get("metadata", {}).get("timestamp"),
-                "relevance_score": result.get("relevance_score", 0.0),
-                "similarity_score": result.get("similarity_score", 0.0),
-                "recency_score": result.get("recency_score", 0.0),
-            })
-
-        logger.debug(f"Found {len(operations)} relevant operations for query: {query[:50]}...")
+        logger.debug(f"Found {len(operations)} recent operations")
 
         return {
             "success": True,
@@ -108,7 +71,7 @@ async def get_relevant_operations(
         }
 
     except Exception as e:
-        logger.error(f"Unexpected error getting relevant operations: {e}")
+        logger.error(f"Unexpected error getting operations: {e}")
         return {
             "success": False,
             "error": str(e),
@@ -126,61 +89,94 @@ async def build_prompt(
     include_operations: bool = True,
     max_operations: int = 20,
 ) -> dict[str, Any]:
-    """Build dynamic prompt with context for Claude Code.
+    """Build dynamic prompt with context - simplified with blackboard.
 
     Args:
         query: Current task/query
-        shell_id: Optional shell ID for context
-        tunnel_id: Optional tunnel ID for context
-        include_topology: Include network topology diagram
+        shell_id: Optional shell ID for context (ignored)
+        tunnel_id: Optional tunnel ID for context (ignored)
+        include_topology: Include network topology (simplified)
         include_tunnels: Include active tunnels list
         include_shells: Include active shells list
-        include_operations: Include relevant operation history
+        include_operations: Include recent operation history
         max_operations: Maximum number of operations to include
 
     Returns:
         Response dict with formatted prompt
     """
     try:
-        if not _prompt_builder:
+        if not _blackboard:
             return {
                 "success": False,
-                "error": "Prompt builder not initialized",
+                "error": "Blackboard not initialized",
                 "error_type": "initialization_error",
             }
 
-        # Build context
-        context = {}
-        if shell_id:
-            context["shell_id"] = shell_id
-        if tunnel_id:
-            context["tunnel_id"] = tunnel_id
+        # Get current state
+        state = _blackboard.get_state()
 
-        # Build prompt
-        prompt = _prompt_builder.build_prompt(
-            query=query,
-            context=context,
-            include_topology=include_topology,
-            include_tunnels=include_tunnels,
-            include_shells=include_shells,
-            include_operations=include_operations,
-            max_operations=max_operations,
-        )
+        # Build prompt sections
+        sections = []
 
-        # Get token count
-        token_count = _prompt_builder.estimate_prompt_tokens(prompt)
+        sections.append("Current AMP State:\n")
 
-        # Get context stats
-        stats = _prompt_builder.get_context_stats(context)
+        if include_tunnels:
+            tunnels = state.get("tunnels", [])
+            sections.append(f"\nTunnels ({len(tunnels)}):")
+            if tunnels:
+                for t in tunnels:
+                    sections.append(
+                        f"  - {t['name']}: {t['type']} {t['local_port']} -> {t['remote']} [{t['status']}]"
+                    )
+            else:
+                sections.append("  (none)")
 
-        logger.info(f"Built prompt: {token_count} tokens, {len(prompt)} chars")
+        if include_shells:
+            shells = state.get("shells", [])
+            sections.append(f"\nShells ({len(shells)}):")
+            if shells:
+                for s in shells:
+                    sections.append(
+                        f"  - {s['name']}: {s['type']} {s['target']} ({s['os']}) [{s['status']}]"
+                    )
+            else:
+                sections.append("  (none)")
+
+        if include_topology:
+            network = state.get("network", {})
+            segment_count = network.get("segment_count", 0)
+            sections.append(f"\nNetwork: {segment_count} segments")
+
+        if include_operations:
+            operations = state.get("recent_operations", [])[:max_operations]
+            sections.append(f"\nRecent Operations ({len(operations)}):")
+            if operations:
+                for op in operations:
+                    cmd = op.get("command", "")[:50]
+                    output = op.get("output", "")[:50]
+                    sections.append(f"  - {cmd}... -> {output}...")
+            else:
+                sections.append("  (none)")
+
+        sections.append(f"\nQuery: {query}")
+
+        prompt = "\n".join(sections)
+
+        # Simple token estimation (4 chars per token)
+        token_count = len(prompt) // 4
+
+        logger.info(f"Built prompt: ~{token_count} tokens, {len(prompt)} chars")
 
         return {
             "success": True,
             "data": {
                 "prompt": prompt,
                 "token_count": token_count,
-                "stats": stats,
+                "stats": {
+                    "tunnels": len(state.get("tunnels", [])),
+                    "shells": len(state.get("shells", [])),
+                    "operations": len(state.get("recent_operations", [])),
+                },
             },
         }
 
@@ -199,42 +195,25 @@ async def compress_context(
     max_tokens: int = 4000,
     threshold: float = 0.3,
 ) -> dict[str, Any]:
-    """Compress context to fit token budget.
+    """Compress context to fit token budget - simplified version.
 
     Args:
         operations: List of operations to compress
-        query: Current query for relevance scoring
+        query: Current query for relevance scoring (ignored)
         max_tokens: Maximum token budget
-        threshold: Minimum relevance threshold
+        threshold: Minimum relevance threshold (ignored)
 
     Returns:
         Response dict with compressed operations
     """
     try:
-        if not _context_compressor:
-            return {
-                "success": False,
-                "error": "Context compressor not initialized",
-                "error_type": "initialization_error",
-            }
-
-        # Compress operations
-        compressed = _context_compressor.compress_operations(
-            operations=operations,
-            query=query,
-        )
-
-        # Filter by threshold
-        filtered = [
-            op for op in compressed
-            if op.get("relevance_score", 0.0) >= threshold
-        ]
-
-        # Truncate to fit token budget
+        # Simple compression: just truncate to fit token budget
         final_ops = []
         current_tokens = 0
-        for op in filtered:
-            op_tokens = _context_compressor.estimate_tokens(str(op))
+
+        for op in operations:
+            # Estimate tokens (4 chars per token)
+            op_tokens = len(str(op)) // 4
             if current_tokens + op_tokens <= max_tokens:
                 final_ops.append(op)
                 current_tokens += op_tokens
@@ -243,7 +222,7 @@ async def compress_context(
 
         logger.debug(
             f"Compressed {len(operations)} operations to {len(final_ops)} "
-            f"({current_tokens} tokens)"
+            f"(~{current_tokens} tokens)"
         )
 
         return {

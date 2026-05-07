@@ -39,9 +39,10 @@ async def main() -> None:
 
         # Initialize database
         database = Database(settings.database.url)
+        database.create_tables()
         logger.info("Database initialized")
 
-        # Create MCP server
+        # Create MCP server (fast startup - no model preloading)
         server = create_mcp_server(database)
         logger.info("MCP server created")
 

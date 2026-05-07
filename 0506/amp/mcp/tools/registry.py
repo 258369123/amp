@@ -3,10 +3,7 @@
 import logging
 from typing import Any
 
-from amp.core.context.compression import ContextCompressor
-from amp.core.context.prompt_builder import PromptBuilder
-from amp.core.context.search import SimilaritySearch
-from amp.core.context.vector_store import VectorStore
+from amp.core.blackboard import Blackboard
 from amp.core.network.graph import NetworkGraph
 from amp.core.network.router import RouteCalculator
 from amp.core.network.visualizer import TopologyVisualizer
@@ -30,25 +27,12 @@ def initialize_managers(database: Database) -> dict[str, Any]:
     Returns:
         Dictionary of initialized managers
     """
-    from amp.config import settings
-
     # Initialize managers
     tunnel_manager = TunnelManager(database)
     shell_manager = ShellManager(database)
 
-    # Initialize context components
-    vector_store = VectorStore(db_path=settings.context.vector_db_path)
-    similarity_search = SimilaritySearch(vector_store)
-    prompt_builder = PromptBuilder(
-        vector_store=vector_store,
-        tunnel_manager=tunnel_manager,
-        shell_manager=shell_manager,
-        max_tokens=settings.context.max_tokens,
-    )
-    context_compressor = ContextCompressor(
-        max_tokens=settings.context.max_tokens,
-        threshold=settings.context.compression_threshold,
-    )
+    # Initialize blackboard (replaces complex context system)
+    blackboard = Blackboard(database)
 
     # Initialize network components
     network_graph = NetworkGraph()
@@ -59,10 +43,7 @@ def initialize_managers(database: Database) -> dict[str, Any]:
         "database": database,
         "tunnel_manager": tunnel_manager,
         "shell_manager": shell_manager,
-        "vector_store": vector_store,
-        "similarity_search": similarity_search,
-        "prompt_builder": prompt_builder,
-        "context_compressor": context_compressor,
+        "blackboard": blackboard,
         "network_graph": network_graph,
         "topology_visualizer": topology_visualizer,
         "route_calculator": route_calculator,
@@ -79,9 +60,7 @@ def register_all_tools(managers: dict[str, Any]) -> None:
     tunnel_tools.set_tunnel_manager(managers["tunnel_manager"])
     shell_tools.set_shell_manager(managers["shell_manager"])
     context_tools.set_context_components(
-        managers["similarity_search"],
-        managers["prompt_builder"],
-        managers["context_compressor"],
+        managers["blackboard"],
     )
     network_tools.set_network_components(
         managers["network_graph"],

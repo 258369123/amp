@@ -3,8 +3,11 @@
 This module adapts the existing 17 AMP tools to the MCP Tool schema.
 """
 
+import asyncio
 import logging
-from typing import Any
+from collections.abc import Callable
+from functools import wraps
+from typing import Any, TypeVar
 
 from mcp.types import Tool
 
@@ -14,6 +17,37 @@ from amp.mcp.tools.registry import initialize_managers, register_all_tools
 from amp.storage.database import Database
 
 logger = logging.getLogger(__name__)
+
+# Type variable for generic function
+F = TypeVar('F', bound=Callable[..., Any])
+
+
+def with_timeout(seconds: int = 30) -> Callable[[F], F]:
+    """Decorator to add timeout protection to tool functions.
+
+    Args:
+        seconds: Timeout in seconds (default: 30)
+
+    Returns:
+        Decorated function with timeout protection
+    """
+    def decorator(func: F) -> F:
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return await asyncio.wait_for(
+                    func(*args, **kwargs),
+                    timeout=seconds
+                )
+            except TimeoutError:
+                logger.error(f"Tool {func.__name__} timed out after {seconds}s")
+                return {
+                    "success": False,
+                    "error": f"Tool timed out after {seconds}s",
+                    "error_type": "timeout_error"
+                }
+        return wrapper  # type: ignore
+    return decorator
 
 
 class MCPToolAdapter:
@@ -119,8 +153,9 @@ class MCPToolAdapter:
         }
         return type_mapping.get(param_type, "string")
 
+    @with_timeout(30)
     async def execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Execute a tool.
+        """Execute a tool with timeout protection.
 
         Args:
             name: Tool name
