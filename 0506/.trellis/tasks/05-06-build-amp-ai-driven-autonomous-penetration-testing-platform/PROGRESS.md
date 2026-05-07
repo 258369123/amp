@@ -240,8 +240,34 @@ Files created:
 
 Test coverage: graph 96%, router 89%, visualizer 98%
 
-### PR9: MCP Server - Core (Next)
-- FastAPI server setup
-- MCP protocol implementation
-- Tool registration
-- Authentication
+### PR9: MCP Server - Core ✅ (Completed)
+**Commit**: ba05900
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ FastAPI server with async support
+- ✅ MCP protocol models (Pydantic validation)
+- ✅ Tool registry and execution engine
+- ✅ Authentication middleware (Bearer token)
+- ✅ CORS configuration for Claude Code
+- ✅ Health check and tool discovery endpoints
+- ✅ Comprehensive documentation
+- ✅ Unit tests (32 tests, 100% pass rate)
+
+Files created:
+- amp/mcp/server.py (FastAPI application)
+- amp/mcp/protocol.py (MCP protocol models)
+- amp/mcp/tools.py (Tool registry)
+- amp/mcp/auth.py (Authentication middleware)
+- amp/mcp/README.md (Documentation)
+- amp/tests/unit/test_mcp_server.py (16 tests)
+- amp/tests/unit/test_mcp_tools.py (16 tests)
+- examples/mcp_server_example.py (Usage example)
+
+Test coverage: protocol 100%, tools 97%, server 87%
+
+### PR10: MCP Tools - Implementation (Next)
+- Tunnel management tools
+- Shell management tools
+- Context query tools
+- Network topology tools
