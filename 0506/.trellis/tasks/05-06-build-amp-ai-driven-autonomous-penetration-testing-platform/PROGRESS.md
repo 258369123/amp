@@ -45,8 +45,29 @@ Files created:
 - amp/tests/unit/test_storage.py (Unit tests)
 - pyproject.toml (Build configuration)
 
-#### PR2: Tunnel Manager - Core (Next)
-- Chisel wrapper (spawn, monitor, kill)
-- Tunnel lifecycle management
-- Health check mechanism
-- Basic tests with mock processes
+#### PR2: Tunnel Manager - Core ✅ (Completed)
+**Commit**: 864cc5f
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ ChiselProcess wrapper (spawn, monitor, kill)
+- ✅ TunnelManager lifecycle management
+- ✅ Health check mechanism with heartbeat
+- ✅ Process monitoring (psutil integration)
+- ✅ Nested tunnel support
+- ✅ Graceful shutdown with timeout
+- ✅ Stale tunnel cleanup
+- ✅ Process statistics and log capture
+- ✅ Unit tests (28 tests, 74% coverage)
+
+Files created:
+- amp/core/tunnel/chisel.py (ChiselProcess wrapper)
+- amp/core/tunnel/manager.py (TunnelManager)
+- amp/tests/unit/test_tunnel_manager.py (Unit tests)
+
+#### PR3: Tunnel Manager - Advanced (Next)
+- Ligolo-ng wrapper
+- Nested tunnel support
+- Auto-recovery on disconnect
+- Cascade failure handling
+- Integration tests with real Chisel/Ligolo
