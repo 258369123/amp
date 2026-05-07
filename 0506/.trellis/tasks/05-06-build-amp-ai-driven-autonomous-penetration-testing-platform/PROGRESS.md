@@ -186,8 +186,41 @@ Files created:
 - amp/core/context/compression.py (context compression)
 - amp/tests/unit/test_context_storage.py (27 tests)
 
-### PR7: Context Engine - Prompt Builder (Next)
-- Dynamic prompt generation
-- Progressive disclosure logic
-- Token budget management
-- Relevance scoring algorithm
+### PR7: Context Engine - Prompt Builder ✅ (Completed)
+**Commit**: bb08712
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ PromptBuilder (dynamic prompt generation)
+- ✅ PromptFormatter (format operations/tunnels/shells)
+- ✅ RelevanceScorer (multi-factor scoring)
+- ✅ Progressive disclosure logic
+- ✅ Token budget management
+- ✅ Network topology visualization (Mermaid)
+- ✅ Context filtering
+- ✅ Unit tests (26 tests, 100% pass rate)
+
+Files created:
+- amp/core/context/prompt_builder.py (PromptBuilder)
+- amp/core/context/formatter.py (PromptFormatter)
+- amp/core/context/relevance.py (RelevanceScorer)
+- amp/tests/unit/test_prompt_builder.py (26 tests)
+
+### Phase 3 Summary ✅
+**Status**: Completed (Storage + Prompt Builder)
+**Total Commits**: 2 PRs
+**Total Tests**: 53 (27 storage + 26 prompt builder, all passing)
+
+Phase 3 delivered:
+- Complete context engine with vector storage
+- Dynamic prompt generation with progressive disclosure
+- Relevance-based operation search
+- Token-aware context compression
+
+## Phase 4: Integration (Week 7-8)
+
+### PR8: Network Topology (Next)
+- In-memory graph structure
+- Route calculation
+- Topology visualization (Mermaid)
+- Dependency tracking
