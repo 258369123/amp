@@ -17,9 +17,36 @@
 - [ ] PRD finalized with research insights
 - [ ] Ready to start implementation
 
-## Next Milestone
-Once all research completes:
-- Review findings
-- Update PRD with technical decisions
-- Run `python3 .trellis/scripts/task.py start 05-06-build-amp-ai-driven-autonomous-penetration-testing-platform`
-- Begin Phase 1: Foundation (Storage + Tunnel Manager)
+## Implementation Phase
+
+### Phase 1: Foundation (Week 1-2)
+
+#### PR1: Project scaffolding + Storage layer ✅ (Completed)
+**Commit**: 3dade61
+**Status**: Merged to branch `claude`
+
+Implemented:
+- ✅ SQLAlchemy schema (Tunnel, Shell, Operation, NetworkSegment)
+- ✅ Pydantic models with type validation
+- ✅ Repository pattern (TunnelRepository, ShellRepository, OperationRepository, NetworkSegmentRepository)
+- ✅ Database connection manager with session handling
+- ✅ Configuration management (pydantic-settings)
+- ✅ Exception hierarchy
+- ✅ Unit tests (14 tests, 77% coverage)
+- ✅ Project structure and build configuration
+
+Files created:
+- amp/storage/schema.py (SQLAlchemy entities)
+- amp/storage/models.py (Pydantic models)
+- amp/storage/repository.py (Repository pattern)
+- amp/storage/database.py (Database manager)
+- amp/config.py (Configuration)
+- amp/exceptions.py (Exception hierarchy)
+- amp/tests/unit/test_storage.py (Unit tests)
+- pyproject.toml (Build configuration)
+
+#### PR2: Tunnel Manager - Core (Next)
+- Chisel wrapper (spawn, monitor, kill)
+- Tunnel lifecycle management
+- Health check mechanism
+- Basic tests with mock processes

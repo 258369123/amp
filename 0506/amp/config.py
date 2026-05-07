@@ -76,6 +76,7 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         env_nested_delimiter = "__"
         case_sensitive = False
+        env_prefix = "AMP_"
 
     def ensure_directories(self):
         """Ensure required directories exist."""
