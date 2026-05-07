@@ -95,6 +95,70 @@ class ShellState:
 
         return PrivilegeLevel.USER
 
+    def detect_windows_privilege(self, output: str) -> PrivilegeLevel:
+        """Detect Windows privilege level from command output.
+
+        Args:
+            output: Command output (e.g., from 'whoami' or 'net session')
+
+        Returns:
+            Detected privilege level
+        """
+        output = output.strip().lower()
+
+        # Check for SYSTEM account
+        if "nt authority\\system" in output or "system" in output:
+            return PrivilegeLevel.SYSTEM
+
+        # Check for Administrator
+        if "administrator" in output or "admin" in output:
+            return PrivilegeLevel.ROOT
+
+        # Check for "Access is denied" which indicates non-admin
+        if "access is denied" in output:
+            return PrivilegeLevel.USER
+
+        return PrivilegeLevel.USER
+
+    def detect_uac_status(self, output: str) -> bool:
+        """Detect if UAC is enabled from registry query output.
+
+        Args:
+            output: Output from UAC registry query
+
+        Returns:
+            True if UAC is enabled, False otherwise
+        """
+        output = output.strip().lower()
+
+        # Check registry value
+        if "enablelua" in output:
+            # Look for the value (0x1 = enabled, 0x0 = disabled)
+            if "0x1" in output or "1" in output:
+                return True
+            if "0x0" in output or "0" in output:
+                return False
+
+        # Default to enabled (safer assumption)
+        return True
+
+    def parse_windows_env(self, output: str) -> dict[str, str]:
+        """Parse Windows environment variables from command output.
+
+        Args:
+            output: Output from 'set' command (CMD) or '$env:' (PowerShell)
+
+        Returns:
+            Dictionary of environment variables
+        """
+        env = {}
+        for line in output.split("\n"):
+            line = line.strip()
+            if "=" in line:
+                key, _, value = line.partition("=")
+                env[key] = value
+        return env
+
     def detect_shell_type(self, output: str) -> ShellProgram:
         """Detect shell type from command output.
 
