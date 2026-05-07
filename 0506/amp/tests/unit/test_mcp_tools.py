@@ -4,7 +4,7 @@ import pytest
 
 from amp.exceptions import MCPToolExecutionFailed
 from amp.mcp.protocol import ParameterType, ToolParameter
-from amp.mcp.tools import ToolRegistry
+from amp.mcp.tool_registry import ToolRegistry
 
 
 @pytest.fixture

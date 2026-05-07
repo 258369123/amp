@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from amp.config import settings
 from amp.mcp.protocol import ParameterType, ToolParameter
 from amp.mcp.server import create_app
-from amp.mcp.tools import tool_registry
+from amp.mcp.tool_registry import tool_registry
 
 
 @pytest.fixture
